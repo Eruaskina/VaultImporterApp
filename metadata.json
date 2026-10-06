@@ -1,0 +1,6 @@
+{
+  "name": "Vault Secret Manager & Multi-Env Config Hub",
+  "description": "HashiCorp Vault secret yöneticisi, KV v2 secret gezgini, anahtar bazlı JSON düzenleyici ve appsettings toplu dağıtım platformu.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
