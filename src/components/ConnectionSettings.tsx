@@ -34,7 +34,7 @@ export const ConnectionSettings: React.FC<ConnectionSettingsProps> = ({
   // Check URL server type
   const is108Server = connection.url.includes('10.240.1.108') || connection.serverType === 'dual_path_108';
 
-  const handleApplyPreset = (type: '54' | '108' | 'demo') => {
+  const handleApplyPreset = (type: '54' | '108' | 'compose' | 'host' | 'demo') => {
     if (type === '54') {
       onUpdateConnection({
         url: 'http://10.240.52.54:8200',
@@ -57,6 +57,29 @@ export const ConnectionSettings: React.FC<ConnectionSettingsProps> = ({
         isDemoMode: false,
       });
       onAddLog('info', 'Ön ayar uygulandı: 10.240.1.108:8200 (Çift Path & Dev/Test/Prod Ortam)');
+    } else if (type === 'compose') {
+      onUpdateConnection({
+        url: 'http://vault-dev:8200',
+        token: 'root',
+        engine: 'secret',
+        appName: 'afc-saas',
+        username: 'test-user',
+        selectedEnv: 'dev',
+        serverType: 'dual_path_108',
+        isDemoMode: false,
+      });
+      onAddLog('info', 'Ön ayar uygulandı: Docker Compose Vault (http://vault-dev:8200, Token: root)');
+    } else if (type === 'host') {
+      onUpdateConnection({
+        url: 'http://host.docker.internal:8200',
+        engine: 'asis',
+        appName: 'afc-saas',
+        username: connection.username || 'test-user',
+        selectedEnv: 'dev',
+        serverType: 'dual_path_108',
+        isDemoMode: false,
+      });
+      onAddLog('info', 'Ön ayar uygulandı: Ana Sunucu Vault (http://host.docker.internal:8200)');
     } else if (type === 'demo') {
       onUpdateConnection({
         url: 'http://10.240.52.54:8200 (Sandbox)',
@@ -168,19 +191,33 @@ export const ConnectionSettings: React.FC<ConnectionSettingsProps> = ({
         </div>
 
         {/* Quick presets */}
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
           <span className="text-xs text-slate-400">Hızlı Ön Ayarlar:</span>
+          <button
+            onClick={() => handleApplyPreset('compose')}
+            className="px-2.5 py-1 text-xs bg-slate-800 hover:bg-slate-700 text-cyan-300 border border-cyan-800/60 rounded transition-colors whitespace-nowrap"
+            title="Docker compose içindeki vault-dev servisine bağlanır"
+          >
+            vault-dev (Docker)
+          </button>
+          <button
+            onClick={() => handleApplyPreset('host')}
+            className="px-2.5 py-1 text-xs bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 rounded transition-colors whitespace-nowrap"
+            title="Aynı sunucunun hostundaki Vault servisine bağlanır"
+          >
+            host.docker.internal
+          </button>
           <button
             onClick={() => handleApplyPreset('54')}
             className="px-2.5 py-1 text-xs bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 rounded transition-colors whitespace-nowrap"
           >
-            10.240.52.54 (Prod)
+            10.240.52.54
           </button>
           <button
             onClick={() => handleApplyPreset('108')}
             className="px-2.5 py-1 text-xs bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 rounded transition-colors whitespace-nowrap"
           >
-            10.240.1.108 (Dev/Test)
+            10.240.1.108
           </button>
           <button
             onClick={() => handleApplyPreset('demo')}

@@ -26,7 +26,7 @@ app.use((req, res, next) => {
   next();
 });
 
-// Helper to make requests to real Vault server
+// Helper to make requests to real Vault server with Docker container/host resolution
 async function callVault(
   vaultUrl: string,
   vaultPath: string,
@@ -37,7 +37,19 @@ async function callVault(
 ) {
   const cleanBase = vaultUrl.replace(/\/+$/, '');
   const cleanPath = vaultPath.replace(/^\/+/, '');
-  const url = `${cleanBase}/v1/${cleanPath}`;
+
+  // Generate candidate base URLs if user specifies localhost or 127.0.0.1 in Docker
+  const candidateBases: string[] = [cleanBase];
+  if (cleanBase.includes('localhost') || cleanBase.includes('127.0.0.1')) {
+    const portMatch = cleanBase.match(/:(\d+)$/);
+    const port = portMatch ? portMatch[1] : '8200';
+    // Add Docker Compose service name alias
+    candidateBases.push(`http://vault-dev:${port}`);
+    // Add host gateway alias
+    candidateBases.push(`http://host.docker.internal:${port}`);
+    // Add default docker bridge host IP
+    candidateBases.push(`http://172.17.0.1:${port}`);
+  }
 
   const headers: Record<string, string> = {
     'X-Vault-Token': token,
@@ -48,40 +60,53 @@ async function callVault(
     headers['X-Vault-Namespace'] = namespace;
   }
 
-  const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), 12000); // 12s timeout
+  let lastError: any = null;
 
-  try {
-    const response = await fetch(url, {
-      method,
-      headers,
-      body: body ? JSON.stringify(body) : undefined,
-      signal: controller.signal,
-    });
+  for (const base of candidateBases) {
+    const url = `${base}/v1/${cleanPath}`;
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 6000); // 6s timeout per candidate
 
-    clearTimeout(timeoutId);
-
-    const text = await response.text();
-    let data;
     try {
-      data = text ? JSON.parse(text) : null;
-    } catch {
-      data = text;
-    }
+      const response = await fetch(url, {
+        method,
+        headers,
+        body: body ? JSON.stringify(body) : undefined,
+        signal: controller.signal,
+      });
 
-    return {
-      status: response.status,
-      ok: response.ok,
-      data,
-    };
-  } catch (err: any) {
-    clearTimeout(timeoutId);
-    return {
-      status: 0,
-      ok: false,
-      error: err.name === 'AbortError' ? 'Bağlantı zaman aşımına uğradı (12s)' : (err.message || 'Vault sunucusuna ulaşılamadı'),
-    };
+      clearTimeout(timeoutId);
+
+      const text = await response.text();
+      let data;
+      try {
+        data = text ? JSON.parse(text) : null;
+      } catch {
+        data = text;
+      }
+
+      return {
+        status: response.status,
+        ok: response.ok,
+        data,
+      };
+    } catch (err: any) {
+      clearTimeout(timeoutId);
+      lastError = err;
+      // Try next candidate in loop
+    }
   }
+
+  const isLocalhost = cleanBase.includes('localhost') || cleanBase.includes('127.0.0.1');
+  const errorMsg = isLocalhost
+    ? "Vault'a erişilemedi. Docker konteyneri içerisindeyken aynı compose'daki Vault için 'http://vault-dev:8200', veya ana sunucu (host) Vault'u için 'http://host.docker.internal:8200' kullanabilirsiniz."
+    : (lastError?.name === 'AbortError' ? 'Bağlantı zaman aşımına uğradı' : (lastError?.message || 'Vault sunucusuna ulaşılamadı'));
+
+  return {
+    status: 0,
+    ok: false,
+    error: errorMsg,
+  };
 }
 
 // 1. Vault test connection
