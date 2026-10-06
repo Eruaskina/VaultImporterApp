@@ -412,23 +412,29 @@ export const ConnectionSettings: React.FC<ConnectionSettingsProps> = ({
 
           {/* Generated path preview info */}
           <div className="mt-3 p-3 bg-slate-950/70 border border-slate-800/80 rounded text-xs space-y-1">
-            <span className="text-slate-400 font-medium">Oluşturulacak Vault Yolları Örneği (İstanbul için):</span>
+            <span className="text-slate-400 font-medium">Oluşturulacak Vault Yolları Örneği (Tekirdağ için):</span>
             <div className="font-mono text-[11px] text-cyan-400/90 space-y-0.5">
-              {is108Server ? (
+              {connection.selectedEnv === 'prod' ? (
+                <div>
+                  1. <span className="text-slate-500">{connection.engine}/</span>
+                  <span className="text-cyan-300">prod/apps-tekirdag/{connection.appName || 'afc-saas-api'}/tekirdag</span>
+                  <span className="ml-2 text-emerald-400 text-[10px]">(Prod: Kullanıcıya özel path oluşturulmaz)</span>
+                </div>
+              ) : is108Server ? (
                 <>
                   <div>
                     1. <span className="text-slate-500">{connection.engine}/</span>
-                    <span className="text-cyan-300">{connection.selectedEnv}/apps-istanbul/{connection.appName || 'afc-saas'}/istanbul/user/{connection.username || 'user'}</span>
+                    <span className="text-cyan-300">{connection.selectedEnv}/apps-tekirdag/{connection.appName || 'afc-saas-api'}/tekirdag/user/{connection.username || 'user'}</span>
                   </div>
                   <div>
                     2. <span className="text-slate-500">{connection.engine}/</span>
-                    <span className="text-cyan-300">{connection.selectedEnv}/apps-istanbul/{connection.appName || 'afc-saas'}/istanbul</span>
+                    <span className="text-cyan-300">{connection.selectedEnv}/apps-tekirdag/{connection.appName || 'afc-saas-api'}/tekirdag</span>
                   </div>
                 </>
               ) : (
                 <div>
                   1. <span className="text-slate-500">{connection.engine}/</span>
-                  <span className="text-cyan-300">prod/apps-istanbul/{connection.appName || 'afc-saas'}/istanbul</span>
+                  <span className="text-cyan-300">{connection.selectedEnv}/apps-tekirdag/{connection.appName || 'afc-saas-api'}/tekirdag</span>
                 </div>
               )}
             </div>

@@ -78,14 +78,21 @@ export const BatchUploader: React.FC<BatchUploaderProps> = ({
     }
 
     const targetPaths: string[] = [];
-    const app = appName || 'afc-saas';
+    const app = appName || 'afc-saas-api';
     const user = username || 'test-user';
 
-    if (isDual) {
-      targetPaths.push(`${env}/apps-${cityName}/${app}/${cityName}/user/${user}`);
-      targetPaths.push(`${env}/apps-${cityName}/${app}/${cityName}`);
-    } else {
+    // KURAL: Prod ortamında NE OLURSA OLSUN kullanıcı özelinde secret oluşturulmaz!
+    // Sadece: prod/apps-{sehir}/{app}/{sehir} (örn: prod/apps-tekirdag/afc-saas-api/tekirdag)
+    if (env === 'prod') {
       targetPaths.push(`prod/apps-${cityName}/${app}/${cityName}`);
+    } else {
+      // Dev ve Test ortamında mevcut çift path mantığı aynen korunur:
+      if (isDual) {
+        targetPaths.push(`${env}/apps-${cityName}/${app}/${cityName}/user/${user}`);
+        targetPaths.push(`${env}/apps-${cityName}/${app}/${cityName}`);
+      } else {
+        targetPaths.push(`${env}/apps-${cityName}/${app}/${cityName}`);
+      }
     }
 
     return { cityName, targetPaths };
@@ -194,6 +201,17 @@ export const BatchUploader: React.FC<BatchUploaderProps> = ({
         },
       },
       {
+        fileName: 'appsettings.tekirdag_api.json',
+        city: 'tekirdag',
+        content: {
+          Logging: { LogLevel: { Default: 'Information' } },
+          ConnectionStrings: {
+            DefaultConnection: 'Server=10.240.59.10;Database=AfcTekirdag_Prod;Uid=tekirdag_usr;Pwd=TekirdagSecretP@ss;',
+          },
+          CityConfig: { Code: '59', Name: 'Tekirdag', Active: true },
+        },
+      },
+      {
         fileName: 'appsettings.bursa.json',
         city: 'bursa',
         content: {
@@ -240,14 +258,18 @@ export const BatchUploader: React.FC<BatchUploaderProps> = ({
       return;
     }
 
-    if (is108Server && !connection.username.trim()) {
-      alert("10.240.1.108 sunucusu için 'Kullanıcı Adı (Username)' zorunludur!");
+    // Dev ve Test ortamında 108 sunucusu için kullanıcı adı zorunludur; PROD ortamında ise kullanıcı özelinde secret oluşturulmaz.
+    if (connection.selectedEnv !== 'prod' && is108Server && !connection.username.trim()) {
+      alert("Dev ve Test ortamı için 'Kullanıcı Adı (Username)' zorunludur!");
       return;
     }
 
-    const confirmMsg = is108Server
-      ? `Yapacağınız eklemeler '${connection.selectedEnv.toUpperCase()}' ortamına ve '${connection.username}' kullanıcısına eklenecektir.\n\nOnaylıyor musunuz?`
-      : `Toplam ${files.length} dosya Vault (${connection.engine}) üzerine yüklenecektir.\n\nOnaylıyor musunuz?`;
+    const confirmMsg =
+      connection.selectedEnv === 'prod'
+        ? `Yapacağınız eklemeler PROD ortamına (Kullanıcı özelinde path olmadan, sadece ana servis path'lerine) eklenecektir.\n\nToplam ${files.length} dosya '${connection.engine}' engine'ine yüklenecektir.\n\nOnaylıyor musunuz?`
+        : is108Server
+        ? `Yapacağınız eklemeler '${connection.selectedEnv.toUpperCase()}' ortamına ve '${connection.username}' kullanıcısına eklenecektir.\n\nOnaylıyor musunuz?`
+        : `Toplam ${files.length} dosya Vault (${connection.engine}) üzerine yüklenecektir.\n\nOnaylıyor musunuz?`;
 
     const userConfirmed = window.confirm(confirmMsg);
     if (!userConfirmed) {

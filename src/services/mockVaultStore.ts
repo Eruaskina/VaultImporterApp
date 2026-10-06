@@ -191,6 +191,45 @@ const initialStore: Record<string, Record<string, StoredSecret>> = {
     },
   },
   secret: {
+    'prod/apps-tekirdag/afc-saas-api/tekirdag': {
+      current_version: 1,
+      metadata: {
+        current_version: 1,
+        oldest_version: 1,
+        created_time: new Date(Date.now() - 3600000 * 2).toISOString(),
+        updated_time: new Date(Date.now() - 3600000 * 2).toISOString(),
+        versions: {
+          '1': {
+            version: 1,
+            created_time: new Date(Date.now() - 3600000 * 2).toISOString(),
+          },
+        },
+      },
+      versions: {
+        1: {
+          created_time: new Date(Date.now() - 3600000 * 2).toISOString(),
+          data: {
+            appsettings: {
+              Logging: {
+                LogLevel: {
+                  Default: 'Information',
+                  'Microsoft.AspNetCore': 'Warning',
+                },
+              },
+              ConnectionStrings: {
+                DefaultConnection: 'Server=10.240.59.10;Database=AfcTekirdag_Prod;User Id=tekirdag_usr;Password=TekirdagP@ss2026;',
+              },
+              CityConfig: {
+                Code: '59',
+                Name: 'Tekirdag',
+                Active: true,
+                MaxWorkers: 180,
+              },
+            },
+          },
+        },
+      },
+    },
     'database/central-postgres': {
       current_version: 1,
       metadata: {
