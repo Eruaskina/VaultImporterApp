@@ -5,9 +5,12 @@ FROM node:20-alpine AS builder
 
 WORKDIR /app
 
-# Install dependencies with lockfile support
-COPY package.json ./
-RUN npm install
+# Enable legacy peer deps to prevent ERESOLVE conflicts
+ENV NPM_CONFIG_LEGACY_PEER_DEPS=true
+
+# Install dependencies
+COPY package.json .npmrc* ./
+RUN npm install --legacy-peer-deps
 
 # Copy source code
 COPY . .
@@ -24,10 +27,11 @@ WORKDIR /app
 
 ENV NODE_ENV=production
 ENV PORT=3000
+ENV NPM_CONFIG_LEGACY_PEER_DEPS=true
 
 # Copy package definition and install production dependencies
-COPY package.json ./
-RUN npm install --omit=dev && npm install tsx
+COPY package.json .npmrc* ./
+RUN npm install --omit=dev --legacy-peer-deps && npm install tsx --legacy-peer-deps
 
 # Copy built frontend assets and server file
 COPY --from=builder /app/dist ./dist

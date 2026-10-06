@@ -1,15 +1,13 @@
-version: '3.8'
-
 services:
   # =========================================================================
   # 1. VAULT CONFIG MANAGER (GitHub Reposundan Otomatik Çeker & Derler)
   # =========================================================================
   # Docker Compose build context doğrudan GitHub reposu olarak ayarlanmıştır:
-  # https://github.com/Eruaskina/VaultImporter.git
-  # Docker, build sırasında repoyu otomatik klonlar ve Dockerfile'ı çalıştırır.
+  # https://github.com/Eruaskina/VaultImporterApp.git
+  # "docker compose up -d --build" komutu repoyu otomatik klonlar ve imajı üretir.
   vault-config-manager:
     build:
-      context: https://github.com/Eruaskina/VaultImporter.git#main
+      context: https://github.com/Eruaskina/VaultImporterApp.git#main
       dockerfile: Dockerfile
     container_name: vault-config-manager
     restart: unless-stopped
@@ -18,7 +16,7 @@ services:
     environment:
       - NODE_ENV=production
       - PORT=3000
-    # Şirket içi yerel IP'lere (10.240.x.x) veya host makinedeki Vault'a erişim (CORS / Network çözümü):
+    # Şirket içi yerel IP'lere (10.240.x.x) ve host makineye erişim (CORS / Network çözümü):
     extra_hosts:
       - "host.docker.internal:host-gateway"
     networks:
