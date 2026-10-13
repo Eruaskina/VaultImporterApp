@@ -222,3 +222,221 @@ export function unflattenKeyValues(
 
   return root;
 }
+
+/**
+ * Aggregates secrets from multiple cities into flat Key-Value rows with multi-value detection.
+ */
+export function aggregateSecretsKeys(
+  citySecrets: { city: string; data: Record<string, any> }[],
+  separator: string = ':'
+): import('../types/vault').AggregatedKeyRow[] {
+  const map: Record<
+    string,
+    {
+      cityValues: Record<string, any>;
+      presentInCities: string[];
+      types: Set<string>;
+    }
+  > = {};
+
+  for (const { city, data } of citySecrets) {
+    if (!data) continue;
+    const { targetData } = extractConfigData(data);
+    const flatItems = flattenToKeyValues(targetData, separator);
+
+    for (const item of flatItems) {
+      if (!map[item.key]) {
+        map[item.key] = {
+          cityValues: {},
+          presentInCities: [],
+          types: new Set(),
+        };
+      }
+      map[item.key].cityValues[city] = item.value;
+      if (!map[item.key].presentInCities.includes(city)) {
+        map[item.key].presentInCities.push(city);
+      }
+      map[item.key].types.add(item.type);
+    }
+  }
+
+  const result: import('../types/vault').AggregatedKeyRow[] = [];
+
+  for (const [key, info] of Object.entries(map)) {
+    // Collect unique serialized values to accurately detect multi-values
+    const serializedSet = new Set<string>();
+    const uniqueValues: any[] = [];
+
+    for (const val of Object.values(info.cityValues)) {
+      const ser = typeof val === 'object' ? JSON.stringify(val) : String(val);
+      if (!serializedSet.has(ser)) {
+        serializedSet.add(ser);
+        uniqueValues.push(val);
+      }
+    }
+
+    const typeArray = Array.from(info.types);
+    const dominantType = (typeArray[0] || 'string') as any;
+
+    result.push({
+      key,
+      uniqueValues,
+      hasMultipleValues: uniqueValues.length > 1,
+      cityValues: info.cityValues,
+      presentInCities: info.presentInCities,
+      type: dominantType,
+    });
+  }
+
+  // Sort alphabetically by key
+  return result.sort((a, b) => a.key.localeCompare(b.key));
+}
+
+/**
+ * Applies deletion of key(s) to a secret's raw data and reconstructs it.
+ */
+export function applyDeleteKeysToSecretData(
+  rawVaultData: Record<string, any>,
+  keysToDelete: string[],
+  separator: string = ':'
+): Record<string, any> {
+  const { targetData, hasAppsettingsWrapper, wrapperIsJsonString } = extractConfigData(rawVaultData);
+  const flatItems = flattenToKeyValues(targetData, separator);
+
+  const deleteSet = new Set(keysToDelete);
+  const filtered = flatItems.filter((item) => {
+    if (deleteSet.has(item.key)) return false;
+    // Also remove children of deleted parent paths
+    for (const del of keysToDelete) {
+      if (item.key.startsWith(`${del}${separator}`)) return false;
+    }
+    return true;
+  });
+
+  return unflattenKeyValues(filtered, separator, hasAppsettingsWrapper, wrapperIsJsonString);
+}
+
+/**
+ * Adds or updates key-value pairs in a secret's raw data.
+ */
+export function applyAddKeysToSecretData(
+  rawVaultData: Record<string, any>,
+  newKeyValues: { key: string; value: any; type?: string }[],
+  separator: string = ':'
+): Record<string, any> {
+  const { targetData, hasAppsettingsWrapper, wrapperIsJsonString } = extractConfigData(rawVaultData);
+  const flatItems = flattenToKeyValues(targetData, separator);
+
+  for (const newItem of newKeyValues) {
+    if (!newItem.key || !newItem.key.trim()) continue;
+    const cleanKey = newItem.key.trim();
+    const existingIndex = flatItems.findIndex((it) => it.key === cleanKey);
+
+    let parsedVal = newItem.value;
+    const itemType = (newItem.type || typeof parsedVal) as any;
+
+    if (itemType === 'number') {
+      const n = Number(parsedVal);
+      parsedVal = isNaN(n) ? parsedVal : n;
+    } else if (itemType === 'boolean') {
+      parsedVal = typeof parsedVal === 'boolean' ? parsedVal : String(parsedVal).toLowerCase() === 'true';
+    } else if (itemType === 'null') {
+      parsedVal = null;
+    }
+
+    const kvItem: KeyValueItem = {
+      id: Math.random().toString(36).substring(2, 9),
+      key: cleanKey,
+      value: parsedVal,
+      type: itemType,
+      isSensitive: isSensitiveKey(cleanKey),
+    };
+
+    if (existingIndex >= 0) {
+      flatItems[existingIndex] = kvItem;
+    } else {
+      flatItems.push(kvItem);
+    }
+  }
+
+  return unflattenKeyValues(flatItems, separator, hasAppsettingsWrapper, wrapperIsJsonString);
+}
+
+/**
+ * Updates the value of a key in a secret's raw data.
+ */
+export function applyUpdateValueToSecretData(
+  rawVaultData: Record<string, any>,
+  key: string,
+  newValue: any,
+  newType?: string,
+  separator: string = ':'
+): Record<string, any> {
+  const { targetData, hasAppsettingsWrapper, wrapperIsJsonString } = extractConfigData(rawVaultData);
+  const flatItems = flattenToKeyValues(targetData, separator);
+
+  let parsedVal = newValue;
+  const itemType = (newType || typeof parsedVal) as any;
+  if (itemType === 'number') {
+    const n = Number(parsedVal);
+    parsedVal = isNaN(n) ? parsedVal : n;
+  } else if (itemType === 'boolean') {
+    parsedVal = typeof parsedVal === 'boolean' ? parsedVal : String(parsedVal).toLowerCase() === 'true';
+  } else if (itemType === 'null') {
+    parsedVal = null;
+  }
+
+  const existingIndex = flatItems.findIndex((it) => it.key === key);
+  if (existingIndex >= 0) {
+    flatItems[existingIndex] = {
+      ...flatItems[existingIndex],
+      value: parsedVal,
+      type: itemType,
+    };
+  } else {
+    flatItems.push({
+      id: Math.random().toString(36).substring(2, 9),
+      key,
+      value: parsedVal,
+      type: itemType,
+      isSensitive: isSensitiveKey(key),
+    });
+  }
+
+  return unflattenKeyValues(flatItems, separator, hasAppsettingsWrapper, wrapperIsJsonString);
+}
+
+/**
+ * Renames a key (and all its nested children if any) across a secret's raw data.
+ */
+export function applyRenameKeyToSecretData(
+  rawVaultData: Record<string, any>,
+  oldKey: string,
+  newKey: string,
+  separator: string = ':'
+): Record<string, any> {
+  const { targetData, hasAppsettingsWrapper, wrapperIsJsonString } = extractConfigData(rawVaultData);
+  const flatItems = flattenToKeyValues(targetData, separator);
+
+  const updatedItems = flatItems.map((item) => {
+    if (item.key === oldKey) {
+      return {
+        ...item,
+        key: newKey,
+        isSensitive: isSensitiveKey(newKey),
+      };
+    }
+    if (item.key.startsWith(`${oldKey}${separator}`)) {
+      const suffix = item.key.slice(oldKey.length);
+      const replacedKey = `${newKey}${suffix}`;
+      return {
+        ...item,
+        key: replacedKey,
+        isSensitive: isSensitiveKey(replacedKey),
+      };
+    }
+    return item;
+  });
+
+  return unflattenKeyValues(updatedItems, separator, hasAppsettingsWrapper, wrapperIsJsonString);
+}

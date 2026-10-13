@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { VaultConnection, LogEntry } from './types/vault';
 import { TopBar } from './components/TopBar';
 import { SecretExplorer } from './components/SecretExplorer';
+import { BulkKeyManager } from './components/BulkKeyManager';
 import { BatchUploader } from './components/BatchUploader';
 import { ConnectionSettings } from './components/ConnectionSettings';
 import { LogViewer } from './components/LogViewer';
@@ -14,16 +15,16 @@ const defaultConnection: VaultConnection = {
   url: 'http://10.240.52.54:8200',
   token: '',
   engine: 'asis',
-  appName: 'afc-saas',
+  appName: 'afc-saas-api',
   username: 'test-user',
-  selectedEnv: 'dev',
+  selectedEnv: 'prod',
   serverType: 'dual_path_108',
   isConnected: false,
   isDemoMode: true, // Default to demo mode so user immediately sees live interactive data!
 };
 
 export default function App() {
-  const [activeTab, setActiveTab] = useState<'explorer' | 'batch' | 'settings' | 'logs'>('explorer');
+  const [activeTab, setActiveTab] = useState<'explorer' | 'bulk_keys' | 'batch' | 'settings' | 'logs'>('bulk_keys');
 
   // Load saved connection or default
   const [connection, setConnection] = useState<VaultConnection>(() => {
@@ -148,6 +149,14 @@ export default function App() {
       <main className="flex-1 flex flex-col overflow-hidden">
         {activeTab === 'explorer' && (
           <SecretExplorer connection={connection} onAddLog={addLog} />
+        )}
+
+        {activeTab === 'bulk_keys' && (
+          <BulkKeyManager
+            connection={connection}
+            onAddLog={addLog}
+            onNavigateToExplorer={() => setActiveTab('explorer')}
+          />
         )}
 
         {activeTab === 'batch' && (

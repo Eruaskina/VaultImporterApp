@@ -1,4 +1,4 @@
-import { VaultConnection, SecretEngine, SecretData, BatchFileItem } from '../types/vault';
+import { VaultConnection, SecretEngine, SecretData, BatchFileItem, VaultEnvironment } from '../types/vault';
 import { MockVaultService } from './mockVaultStore';
 
 export class VaultApiService {
@@ -271,6 +271,98 @@ export class VaultApiService {
       };
     } catch (err: any) {
       return { success: false, message: err.message };
+    }
+  }
+
+  /**
+   * Generates standard city secret path.
+   * For prod: strictly `prod/apps-{city}/{app}/{city}` (no user-specific secrets)
+   */
+  static getCitySecretPath(
+    env: VaultEnvironment,
+    city: string,
+    appName: string
+  ): string {
+    const cleanCity = city.trim().toLowerCase();
+    const cleanApp = appName.trim() || 'afc-saas-api';
+    return `${env}/apps-${cleanCity}/${cleanApp}/${cleanCity}`;
+  }
+
+  /**
+   * Discovers existing apps and cities from Vault or Mock store.
+   */
+  static async discoverAppsAndCities(
+    conn: VaultConnection,
+    env: VaultEnvironment
+  ): Promise<{ apps: string[]; cities: string[] }> {
+    const defaultCities = ['istanbul', 'ankara', 'izmir', 'tekirdag', 'bursa'];
+    const defaultApps = ['afc-saas-api', 'afc-saas'];
+
+    if (conn.isDemoMode) {
+      const allPaths = MockVaultService.getAllSecretPaths(conn.engine);
+      const citiesSet = new Set<string>();
+      const appsSet = new Set<string>();
+
+      for (const p of allPaths) {
+        // e.g. prod/apps-istanbul/afc-saas-api/istanbul
+        const regex = new RegExp(`^${env}/apps-([^/]+)/([^/]+)/?`);
+        const match = p.match(regex);
+        if (match) {
+          citiesSet.add(match[1].toLowerCase());
+          appsSet.add(match[2]);
+        }
+      }
+
+      // Merge with defaults
+      defaultCities.forEach((c) => citiesSet.add(c));
+      defaultApps.forEach((a) => appsSet.add(a));
+
+      return {
+        cities: Array.from(citiesSet).sort(),
+        apps: Array.from(appsSet).sort(),
+      };
+    }
+
+    try {
+      // Live Vault search under {env}/
+      const rootRes = await this.listPath(conn, `${env}`);
+      const citiesSet = new Set<string>();
+      const appsSet = new Set<string>();
+
+      if (rootRes.success && rootRes.keys) {
+        for (const k of rootRes.keys) {
+          if (k.startsWith('apps-')) {
+            const cityName = k.replace(/^apps-/, '').replace(/\/$/, '').toLowerCase();
+            if (cityName) citiesSet.add(cityName);
+          }
+        }
+      }
+
+      // Check first 1-2 cities to discover app names
+      const candidateCities = Array.from(citiesSet).slice(0, 3);
+      for (const c of candidateCities) {
+        const appRes = await this.listPath(conn, `${env}/apps-${c}`);
+        if (appRes.success && appRes.keys) {
+          for (const ak of appRes.keys) {
+            const appName = ak.replace(/\/$/, '');
+            if (appName) appsSet.add(appName);
+          }
+        }
+      }
+
+      // Fallback if sets are empty
+      defaultCities.forEach((c) => citiesSet.add(c));
+      defaultApps.forEach((a) => appsSet.add(a));
+
+      return {
+        cities: Array.from(citiesSet).sort(),
+        apps: Array.from(appsSet).sort(),
+      };
+    } catch {
+      return {
+        cities: defaultCities,
+        apps: defaultApps,
+      };
     }
   }
 }

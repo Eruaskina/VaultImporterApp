@@ -1,10 +1,10 @@
 import React from 'react';
 import { VaultConnection } from '../types/vault';
-import { ShieldCheck, ShieldAlert, Database, Server, RefreshCw, Terminal, Layers, UploadCloud } from 'lucide-react';
+import { ShieldCheck, ShieldAlert, Database, Server, RefreshCw, Terminal, Layers, UploadCloud, Sliders } from 'lucide-react';
 
 interface TopBarProps {
-  activeTab: 'explorer' | 'batch' | 'settings' | 'logs';
-  setActiveTab: (tab: 'explorer' | 'batch' | 'settings' | 'logs') => void;
+  activeTab: 'explorer' | 'bulk_keys' | 'batch' | 'settings' | 'logs';
+  setActiveTab: (tab: 'explorer' | 'bulk_keys' | 'batch' | 'settings' | 'logs') => void;
   connection: VaultConnection;
   onToggleDemoMode: () => void;
   logCount: number;
@@ -24,7 +24,7 @@ export const TopBar: React.FC<TopBarProps> = ({
         <div className="flex items-center gap-2 text-cyan-400 font-semibold tracking-tight text-base select-none">
           <Database className="w-5 h-5 text-cyan-400" />
           <span className="text-white font-bold">VaultConfig</span>
-          <span className="text-slate-500 font-normal text-xs tracking-normal">v2.4</span>
+          <span className="text-slate-500 font-normal text-xs tracking-normal">v2.5</span>
         </div>
       </div>
 
@@ -39,7 +39,19 @@ export const TopBar: React.FC<TopBarProps> = ({
           }`}
         >
           <Layers className="w-3.5 h-3.5" />
-          <span>Secret Gezgini & Düzenleyici</span>
+          <span>Secret Gezgini</span>
+        </button>
+
+        <button
+          onClick={() => setActiveTab('bulk_keys')}
+          className={`flex items-center gap-2 px-3 py-1.5 text-xs font-medium rounded-md transition-colors whitespace-nowrap ${
+            activeTab === 'bulk_keys'
+              ? 'bg-cyan-950/80 text-cyan-300 shadow-sm border border-cyan-700/70'
+              : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/40'
+          }`}
+        >
+          <Sliders className="w-3.5 h-3.5 text-cyan-400" />
+          <span className="font-semibold">Toplu Değer Yönetimi (Ekle / Sil / Güncelle)</span>
         </button>
 
         <button
@@ -51,7 +63,7 @@ export const TopBar: React.FC<TopBarProps> = ({
           }`}
         >
           <UploadCloud className="w-3.5 h-3.5" />
-          <span>Toplu appsettings Yükleme</span>
+          <span>Toplu Dosya Yükleme</span>
         </button>
 
         <button

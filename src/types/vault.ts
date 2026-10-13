@@ -57,6 +57,7 @@ export interface BatchFileItem {
   targetPaths: string[];
   status: 'pending' | 'success' | 'error' | 'uploading';
   errorMessage?: string;
+  isSelected?: boolean;
 }
 
 export interface LogEntry {
@@ -66,3 +67,23 @@ export interface LogEntry {
   message: string;
   details?: string;
 }
+
+export interface CitySecretRef {
+  city: string;
+  path: string;
+  status: 'idle' | 'loading' | 'success' | 'not_found' | 'error';
+  secretData?: SecretData;
+  error?: string;
+  version?: number;
+}
+
+export interface AggregatedKeyRow {
+  key: string;
+  uniqueValues: any[];
+  hasMultipleValues: boolean;
+  cityValues: Record<string, any>;
+  presentInCities: string[];
+  type: 'string' | 'number' | 'boolean' | 'null';
+}
+
+export type BatchModalMode = 'none' | 'add' | 'delete' | 'update_value' | 'rename_key';

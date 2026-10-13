@@ -1,4 +1,4 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useMemo } from 'react';
 import { VaultConnection, BatchFileItem, VaultEnvironment } from '../types/vault';
 import { VaultApiService } from '../services/vaultApi';
 import {
@@ -10,11 +10,19 @@ import {
   Play,
   RotateCcw,
   Sparkles,
-  Layers,
   Terminal,
   Trash2,
   Eye,
-  FileCheck,
+  CheckSquare,
+  Square,
+  Edit3,
+  Plus,
+  Sliders,
+  Building2,
+  X,
+  Check,
+  Copy,
+  Layers,
 } from 'lucide-react';
 
 interface BatchUploaderProps {
@@ -35,6 +43,14 @@ export const BatchUploader: React.FC<BatchUploaderProps> = ({
   const [activeConsoleLogs, setActiveConsoleLogs] = useState<string[]>([]);
   const [previewItem, setPreviewItem] = useState<BatchFileItem | null>(null);
   const [completedCount, setCompletedCount] = useState(0);
+
+  // Filter & Batch Editing States
+  const [filterCity, setFilterCity] = useState<string>('all');
+  const [showBatchPathModal, setShowBatchPathModal] = useState(false);
+  const [batchModalTab, setBatchModalTab] = useState<'template' | 'replace'>('template');
+  const [templatePattern, setTemplatePattern] = useState('{env}/apps-{city}/{app}/{city}');
+  const [findText, setFindText] = useState('');
+  const [replaceText, setReplaceText] = useState('');
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const logConsoleRef = useRef<HTMLDivElement>(null);
@@ -156,6 +172,7 @@ export const BatchUploader: React.FC<BatchUploaderProps> = ({
         isValidJson: isValid,
         targetPaths,
         status: 'pending',
+        isSelected: true,
       });
     }
 
@@ -243,18 +260,173 @@ export const BatchUploader: React.FC<BatchUploaderProps> = ({
         isValidJson: true,
         targetPaths,
         status: 'pending',
+        isSelected: true,
       };
     });
 
     setFiles(generatedItems);
-    appendConsoleLog('-> 4 adet hazır örnek appsettings yapılandırma dosyası oluşturuldu.');
+    appendConsoleLog('-> 5 adet hazır örnek appsettings yapılandırma dosyası oluşturuldu.');
     onAddLog('info', 'Örnek appsettings dosyaları listeye eklendi.');
   };
+
+  // =========================================================================
+  // MANUAL PATH EDITING HANDLERS (User requirement!)
+  // =========================================================================
+
+  // Update a single target path for a specific file item
+  const handleUpdateSinglePath = (fileId: string, pathIndex: number, newPath: string) => {
+    setFiles((prev) =>
+      prev.map((f) => {
+        if (f.id !== fileId) return f;
+        const updated = [...f.targetPaths];
+        updated[pathIndex] = newPath;
+        return { ...f, targetPaths: updated };
+      })
+    );
+  };
+
+  // Add a new target path to a file item
+  const handleAddPathToFile = (fileId: string) => {
+    setFiles((prev) =>
+      prev.map((f) => {
+        if (f.id !== fileId) return f;
+        const defaultNew = `${connection.selectedEnv}/apps-${f.cityName}/${connection.appName || 'afc-saas-api'}/${f.cityName}`;
+        return { ...f, targetPaths: [...f.targetPaths, defaultNew] };
+      })
+    );
+  };
+
+  // Remove a target path from a file item
+  const handleRemoveSinglePath = (fileId: string, pathIndex: number) => {
+    setFiles((prev) =>
+      prev.map((f) => {
+        if (f.id !== fileId) return f;
+        const updated = f.targetPaths.filter((_, idx) => idx !== pathIndex);
+        return { ...f, targetPaths: updated.length > 0 ? updated : [''] };
+      })
+    );
+  };
+
+  // Reset a file's paths back to automatic algorithm
+  const handleResetFilePaths = (fileId: string) => {
+    setFiles((prev) =>
+      prev.map((f) => {
+        if (f.id !== fileId) return f;
+        const { targetPaths } = calculatePaths(
+          f.fileName,
+          connection.selectedEnv,
+          connection.appName,
+          connection.username,
+          is108Server
+        );
+        return { ...f, targetPaths };
+      })
+    );
+  };
+
+  // Update city name manually for a file item
+  const handleUpdateCityName = (fileId: string, newCity: string) => {
+    setFiles((prev) =>
+      prev.map((f) => {
+        if (f.id !== fileId) return f;
+        return { ...f, cityName: newCity.toLowerCase().trim() };
+      })
+    );
+  };
+
+  // Toggle selection for a file item
+  const handleToggleSelectFile = (fileId: string) => {
+    setFiles((prev) =>
+      prev.map((f) => (f.id === fileId ? { ...f, isSelected: !(f.isSelected ?? true) } : f))
+    );
+  };
+
+  // Master Select All / Deselect All
+  const handleSelectAllFiles = (selectAll: boolean) => {
+    setFiles((prev) => prev.map((f) => ({ ...f, isSelected: selectAll })));
+  };
+
+  // Remove file from list
+  const handleRemoveFile = (fileId: string) => {
+    setFiles((prev) => prev.filter((f) => f.id !== fileId));
+  };
+
+  // Apply batch template to all files or filtered files
+  const handleApplyBatchTemplate = () => {
+    if (!templatePattern.trim()) return;
+
+    setFiles((prev) =>
+      prev.map((f) => {
+        const rendered = templatePattern
+          .replace(/\{env\}/g, connection.selectedEnv)
+          .replace(/\{city\}/g, f.cityName)
+          .replace(/\{app\}/g, connection.appName || 'afc-saas-api')
+          .replace(/\{user\}/g, connection.username || 'test-user');
+        return { ...f, targetPaths: [rendered] };
+      })
+    );
+
+    setShowBatchPathModal(false);
+    appendConsoleLog(`[+] Şablon ile tüm konumlar güncellendi: ${templatePattern}`);
+    onAddLog('success', 'Tüm hedef konumlar şablona göre güncellendi.', templatePattern);
+  };
+
+  // Apply Find & Replace across all target paths
+  const handleApplyFindReplace = () => {
+    if (!findText) return;
+
+    let totalCount = 0;
+    setFiles((prev) =>
+      prev.map((f) => {
+        const updatedPaths = f.targetPaths.map((p) => {
+          if (p.includes(findText)) {
+            totalCount++;
+            return p.split(findText).join(replaceText);
+          }
+          return p;
+        });
+        return { ...f, targetPaths: updatedPaths };
+      })
+    );
+
+    setShowBatchPathModal(false);
+    appendConsoleLog(
+      `[+] Konum Bul & Değiştir tamamlandı: "${findText}" -> "${replaceText}" (${totalCount} adet güncellendi)`
+    );
+    onAddLog('success', `Konumlar güncellendi: "${findText}" -> "${replaceText}"`);
+  };
+
+  // Unique cities in loaded files
+  const uniqueCities = useMemo(() => {
+    const set = new Set<string>();
+    files.forEach((f) => {
+      if (f.cityName) set.add(f.cityName);
+    });
+    return Array.from(set).sort();
+  }, [files]);
+
+  // Displayed files according to city filter
+  const displayedFiles = useMemo(() => {
+    if (filterCity === 'all') return files;
+    return files.filter((f) => f.cityName === filterCity);
+  }, [files, filterCity]);
+
+  // Selected files count
+  const selectedFiles = useMemo(() => {
+    return files.filter((f) => f.isSelected !== false);
+  }, [files]);
+
+  const allSelected = files.length > 0 && files.every((f) => f.isSelected !== false);
 
   // Run the Batch Upload to Vault
   const handleStartBatchUpload = async () => {
     if (files.length === 0) {
       alert('Lütfen önce yüklenecek appsettings dosyalarını seçin.');
+      return;
+    }
+
+    if (selectedFiles.length === 0) {
+      alert('Lütfen yüklenecek en az bir dosya seçin veya ALL butonuna tıklayarak tümünü işaretleyin.');
       return;
     }
 
@@ -266,10 +438,10 @@ export const BatchUploader: React.FC<BatchUploaderProps> = ({
 
     const confirmMsg =
       connection.selectedEnv === 'prod'
-        ? `Yapacağınız eklemeler PROD ortamına (Kullanıcı özelinde path olmadan, sadece ana servis path'lerine) eklenecektir.\n\nToplam ${files.length} dosya '${connection.engine}' engine'ine yüklenecektir.\n\nOnaylıyor musunuz?`
+        ? `Yapacağınız eklemeler PROD ortamına (Kullanıcı özelinde path olmadan, sadece ana servis path'lerine) eklenecektir.\n\nToplam ${selectedFiles.length} dosya '${connection.engine}' engine'ine yüklenecektir.\n\nOnaylıyor musunuz?`
         : is108Server
         ? `Yapacağınız eklemeler '${connection.selectedEnv.toUpperCase()}' ortamına ve '${connection.username}' kullanıcısına eklenecektir.\n\nOnaylıyor musunuz?`
-        : `Toplam ${files.length} dosya Vault (${connection.engine}) üzerine yüklenecektir.\n\nOnaylıyor musunuz?`;
+        : `Toplam ${selectedFiles.length} dosya Vault (${connection.engine}) üzerine yüklenecektir.\n\nOnaylıyor musunuz?`;
 
     const userConfirmed = window.confirm(confirmMsg);
     if (!userConfirmed) {
@@ -285,13 +457,13 @@ export const BatchUploader: React.FC<BatchUploaderProps> = ({
     appendConsoleLog(`-> Vault URL: ${connection.url}`);
     appendConsoleLog(`-> Hedef Engine: ${connection.engine}`);
     appendConsoleLog(`-> Hedef Ortam: ${connection.selectedEnv.toUpperCase()}`);
-    appendConsoleLog(`-> Dosya Sayısı: ${files.length}`);
+    appendConsoleLog(`-> Seçili Dosya Sayısı: ${selectedFiles.length}`);
     appendConsoleLog('='.repeat(50));
 
     let successFileCount = 0;
 
-    for (let i = 0; i < files.length; i++) {
-      const fileItem = files[i];
+    for (let i = 0; i < selectedFiles.length; i++) {
+      const fileItem = selectedFiles[i];
 
       // Mark file as uploading
       setFiles((prev) =>
@@ -308,10 +480,12 @@ export const BatchUploader: React.FC<BatchUploaderProps> = ({
 
       let fileHadError = false;
 
-      // Upload to each target path
+      // Upload to each target path (including manually edited paths)
       for (const vPath of fileItem.targetPaths) {
+        if (!vPath || !vPath.trim()) continue;
+
         try {
-          const res = await VaultApiService.writeSecret(connection, vPath, secretPayload);
+          const res = await VaultApiService.writeSecret(connection, vPath.trim(), secretPayload);
 
           if (res.success) {
             appendConsoleLog(`[+] BAŞARILI: ${fileItem.fileName} -> Path: ${connection.engine}/${vPath}`);
@@ -345,12 +519,12 @@ export const BatchUploader: React.FC<BatchUploaderProps> = ({
 
     appendConsoleLog('\n' + '-'.repeat(50));
     appendConsoleLog(
-      `--- İŞLEM TAMAMLANDI: ${successFileCount} / ${files.length} dosya başarıyla işlendi. ---`
+      `--- İŞLEM TAMAMLANDI: ${successFileCount} / ${selectedFiles.length} dosya başarıyla işlendi. ---`
     );
     appendConsoleLog('-'.repeat(50) + '\n');
     onAddLog(
       'success',
-      `Toplu yükleme tamamlandı: ${successFileCount}/${files.length} dosya Vault'a yazıldı.`
+      `Toplu yükleme tamamlandı: ${successFileCount}/${selectedFiles.length} dosya Vault'a yazıldı.`
     );
 
     setIsProcessing(false);
@@ -363,14 +537,14 @@ export const BatchUploader: React.FC<BatchUploaderProps> = ({
         <div>
           <h1 className="text-xl font-bold text-white tracking-tight flex items-center gap-2">
             <UploadCloud className="w-5 h-5 text-cyan-400" />
-            Toplu appsettings Yapılandırma Dağıtımı
+            <span>Toplu appsettings Yapılandırma Dağıtımı</span>
           </h1>
           <p className="text-xs text-slate-400 mt-1">
-            appsettings.sehir.json dosyalarından şehir adını otomatik çözümler, dinamik Vault path'leri üretir ve KV v2'ye aktarır.
+            appsettings.sehir.json dosyalarını yükleyin, konumları (Vault path) el ile düzenleyin ve KV v2'ye aktarın.
           </p>
         </div>
 
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 flex-wrap">
           <button
             onClick={handleLoadSampleFiles}
             className="px-3 py-1.5 text-xs bg-slate-800 hover:bg-slate-700 text-cyan-300 border border-slate-700 rounded transition-colors flex items-center gap-1.5"
@@ -380,7 +554,7 @@ export const BatchUploader: React.FC<BatchUploaderProps> = ({
           </button>
           <button
             onClick={() => fileInputRef.current?.click()}
-            className="px-3 py-1.5 text-xs bg-cyan-500 hover:bg-cyan-400 text-slate-950 font-semibold rounded transition-colors flex items-center gap-1.5"
+            className="px-3 py-1.5 text-xs bg-cyan-500 hover:bg-cyan-400 text-slate-950 font-semibold rounded transition-colors flex items-center gap-1.5 shadow-sm"
           >
             <FolderOpen className="w-3.5 h-3.5" />
             <span>Dosya / Klasör Seç</span>
@@ -418,8 +592,8 @@ export const BatchUploader: React.FC<BatchUploaderProps> = ({
                 is108Server
               );
             }}
-            placeholder="afc-saas"
-            className="w-full bg-slate-950 border border-slate-800 rounded px-2 py-1 font-mono text-slate-200"
+            placeholder="afc-saas-api"
+            className="w-full bg-slate-950 border border-slate-800 rounded px-2 py-1 font-mono text-slate-200 focus:outline-none focus:border-cyan-500"
           />
         </div>
 
@@ -439,7 +613,7 @@ export const BatchUploader: React.FC<BatchUploaderProps> = ({
               );
             }}
             placeholder="test-user"
-            className="w-full bg-slate-950 border border-slate-800 rounded px-2 py-1 font-mono text-slate-200"
+            className="w-full bg-slate-950 border border-slate-800 rounded px-2 py-1 font-mono text-slate-200 focus:outline-none focus:border-cyan-500"
           />
         </div>
 
@@ -471,14 +645,95 @@ export const BatchUploader: React.FC<BatchUploaderProps> = ({
         </div>
       </div>
 
+      {/* City Filter & Selection Bar (User requirement: ALL button for cities & selection) */}
+      {files.length > 0 && (
+        <div className="bg-slate-900 border border-slate-800 rounded-lg p-3 space-y-2">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            {/* Left: City Filter with prominent ALL button */}
+            <div className="flex items-center gap-1.5 flex-wrap">
+              <span className="text-xs text-slate-400 flex items-center gap-1 mr-1">
+                <Building2 className="w-3.5 h-3.5 text-emerald-400" />
+                <span>Şehir Filtresi:</span>
+              </span>
+
+              {/* ALL Button */}
+              <button
+                onClick={() => setFilterCity('all')}
+                className={`px-2.5 py-1 text-xs font-mono font-bold rounded transition-all border flex items-center gap-1 ${
+                  filterCity === 'all'
+                    ? 'bg-cyan-500 text-slate-950 border-cyan-400 shadow-sm'
+                    : 'bg-slate-950 text-cyan-300 border-slate-700 hover:border-cyan-500'
+                }`}
+                title="Tüm Şehirleri Göster (ALL)"
+              >
+                <CheckSquare className="w-3 h-3" />
+                <span>ALL (Tümü - {files.length})</span>
+              </button>
+
+              {/* Individual city pills */}
+              {uniqueCities.map((c) => {
+                const count = files.filter((f) => f.cityName === c).length;
+                return (
+                  <button
+                    key={c}
+                    onClick={() => setFilterCity(c)}
+                    className={`px-2 py-1 text-xs font-mono rounded capitalize transition-all border ${
+                      filterCity === c
+                        ? 'bg-slate-800 text-cyan-300 border-cyan-500'
+                        : 'bg-slate-950 text-slate-400 border-slate-800 hover:text-slate-200'
+                    }`}
+                  >
+                    {c} ({count})
+                  </button>
+                );
+              })}
+            </div>
+
+            {/* Right: Batch Location Tools & Selection Buttons */}
+            <div className="flex items-center gap-2 flex-wrap">
+              <button
+                onClick={() => handleSelectAllFiles(true)}
+                className="px-2 py-1 text-xs font-mono font-semibold rounded bg-cyan-950 text-cyan-300 border border-cyan-800 hover:bg-cyan-900 transition-colors flex items-center gap-1"
+                title="Tüm dosyaları işaretle"
+              >
+                <CheckSquare className="w-3 h-3" />
+                <span>ALL Seç</span>
+              </button>
+
+              <button
+                onClick={() => handleSelectAllFiles(false)}
+                className="px-2 py-1 text-xs text-slate-400 hover:text-slate-200 bg-slate-950 border border-slate-800 rounded transition-colors"
+                title="İşaretleri kaldır"
+              >
+                Temizle
+              </button>
+
+              <button
+                onClick={() => setShowBatchPathModal(true)}
+                className="px-2.5 py-1 text-xs bg-indigo-950/80 hover:bg-indigo-900 text-indigo-300 border border-indigo-700/60 rounded transition-colors flex items-center gap-1.5"
+                title="Tüm hedef konumları şablonla veya bul-değiştir ile düzenleyin"
+              >
+                <Sliders className="w-3.5 h-3.5 text-indigo-400" />
+                <span>Toplu Konum Düzenle</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Files List / Table */}
       <div className="bg-slate-900 border border-slate-800 rounded-lg overflow-hidden">
         <div className="p-3 bg-slate-900 border-b border-slate-800 flex items-center justify-between">
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-3">
             <FileCode className="w-4 h-4 text-cyan-400" />
             <span className="text-xs font-semibold text-slate-200">
-              İşlenecek appsettings Dosyaları ({files.length})
+              İşlenecek appsettings Dosyaları ({displayedFiles.length}{filterCity !== 'all' ? ` / ${files.length}` : ''})
             </span>
+            {files.length > 0 && (
+              <span className="text-[11px] text-cyan-400 font-mono">
+                [{selectedFiles.length} / {files.length} seçili]
+              </span>
+            )}
           </div>
 
           {files.length > 0 && (
@@ -523,86 +778,197 @@ export const BatchUploader: React.FC<BatchUploaderProps> = ({
             <table className="w-full text-xs text-left">
               <thead className="bg-slate-950/80 text-slate-400 border-b border-slate-800 font-mono text-[11px]">
                 <tr>
-                  <th className="p-3 w-1/4">Dosya Adı</th>
-                  <th className="p-3 w-1/8">Çözümlenen Şehir</th>
-                  <th className="p-3 w-1/2">Hedef Vault Path(leri)</th>
-                  <th className="p-3 w-1/8 text-right">Durum / İşlem</th>
+                  <th className="p-3 w-10 text-center">
+                    <button
+                      type="button"
+                      onClick={() => handleSelectAllFiles(!allSelected)}
+                      className="text-cyan-400 hover:text-cyan-300"
+                      title={allSelected ? 'Tümünü Kaldır' : 'Tümünü Seç (ALL)'}
+                    >
+                      {allSelected ? (
+                        <CheckSquare className="w-4 h-4 text-cyan-400" />
+                      ) : (
+                        <Square className="w-4 h-4 text-slate-500" />
+                      )}
+                    </button>
+                  </th>
+                  <th className="p-3 w-1/5">Dosya Adı</th>
+                  <th className="p-3 w-32">Şehir (El ile Değiştir)</th>
+                  <th className="p-3 w-1/2">
+                    <div className="flex items-center justify-between">
+                      <span>Hedef Vault Konumu (El ile Düzenlenebilir)</span>
+                      <span className="text-[10px] text-cyan-400 font-sans font-normal">
+                        ✎ Metin kutusuna doğrudan yazabilirsiniz
+                      </span>
+                    </div>
+                  </th>
+                  <th className="p-3 w-28 text-right">Durum / İşlem</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-800 font-mono">
-                {files.map((item) => (
-                  <tr key={item.id} className="hover:bg-slate-800/40 transition-colors">
-                    <td className="p-3 text-slate-200">
-                      <div className="flex items-center gap-2">
-                        <FileCode className="w-4 h-4 text-cyan-400 shrink-0" />
-                        <span className="truncate">{item.fileName}</span>
-                      </div>
-                    </td>
+                {displayedFiles.map((item) => {
+                  const isChecked = item.isSelected !== false;
 
-                    <td className="p-3">
-                      <span className="px-2 py-0.5 rounded text-[11px] bg-slate-800 border border-slate-700 text-cyan-300 uppercase">
-                        {item.cityName}
-                      </span>
-                    </td>
-
-                    <td className="p-3 text-slate-300 space-y-1">
-                      {item.targetPaths.map((tp, idx) => (
-                        <div key={idx} className="flex items-center gap-1.5 text-[11px]">
-                          <span className="text-slate-500">{idx + 1}.</span>
-                          <span className="text-slate-500">{connection.engine}/</span>
-                          <span className="text-cyan-300 font-medium">{tp}</span>
-                        </div>
-                      ))}
-                    </td>
-
-                    <td className="p-3 text-right">
-                      <div className="flex items-center justify-end gap-2">
-                        {item.status === 'pending' && (
-                          <span className="text-slate-400 text-[11px]">Bekliyor</span>
-                        )}
-                        {item.status === 'uploading' && (
-                          <span className="text-cyan-400 text-[11px] flex items-center gap-1">
-                            <RotateCcw className="w-3 h-3 animate-spin" />
-                            Yükleniyor
-                          </span>
-                        )}
-                        {item.status === 'success' && (
-                          <span className="text-emerald-400 text-[11px] flex items-center gap-1">
-                            <CheckCircle2 className="w-3 h-3" />
-                            Yüklendi
-                          </span>
-                        )}
-                        {item.status === 'error' && (
-                          <span className="text-rose-400 text-[11px] flex items-center gap-1">
-                            <AlertTriangle className="w-3 h-3" />
-                            Hata
-                          </span>
-                        )}
-
+                  return (
+                    <tr
+                      key={item.id}
+                      className={`hover:bg-slate-800/40 transition-colors ${
+                        !isChecked ? 'opacity-50 bg-slate-950/40' : ''
+                      }`}
+                    >
+                      {/* Checkbox */}
+                      <td className="p-3 text-center">
                         <button
-                          onClick={() => setPreviewItem(item)}
-                          title="İçeriği Önizle"
-                          className="p-1 text-slate-400 hover:text-slate-200 rounded"
+                          type="button"
+                          onClick={() => handleToggleSelectFile(item.id)}
+                          className="text-cyan-400 hover:text-cyan-300"
                         >
-                          <Eye className="w-3.5 h-3.5" />
+                          {isChecked ? (
+                            <CheckSquare className="w-4 h-4 text-cyan-400" />
+                          ) : (
+                            <Square className="w-4 h-4 text-slate-600" />
+                          )}
                         </button>
-                      </div>
-                    </td>
-                  </tr>
-                ))}
+                      </td>
+
+                      {/* File Name */}
+                      <td className="p-3 text-slate-200">
+                        <div className="flex items-center gap-2">
+                          <FileCode className="w-4 h-4 text-cyan-400 shrink-0" />
+                          <span className="truncate font-semibold">{item.fileName}</span>
+                        </div>
+                        <span className="text-[10px] text-slate-500 ml-6 block">
+                          {(item.fileSize / 1024).toFixed(1)} KB
+                        </span>
+                      </td>
+
+                      {/* City Name - INLINE EDITABLE */}
+                      <td className="p-3">
+                        <input
+                          type="text"
+                          value={item.cityName}
+                          onChange={(e) => handleUpdateCityName(item.id, e.target.value)}
+                          className="w-24 bg-slate-950 border border-slate-800 focus:border-cyan-500 text-cyan-300 rounded px-2 py-1 text-xs font-mono uppercase focus:outline-none"
+                          title="Şehir adını el ile değiştirebilirsiniz"
+                        />
+                      </td>
+
+                      {/* Target Paths - INLINE EDITABLE (User requirement!) */}
+                      <td className="p-3 space-y-1.5">
+                        {item.targetPaths.map((tp, idx) => (
+                          <div key={idx} className="flex items-center gap-1.5 group">
+                            <span className="text-slate-500 text-[10px] w-4 shrink-0 font-mono">
+                              {idx + 1}.
+                            </span>
+                            <span className="text-slate-500 text-[11px] font-mono shrink-0 select-none">
+                              {connection.engine}/
+                            </span>
+                            <input
+                              type="text"
+                              value={tp}
+                              onChange={(e) =>
+                                handleUpdateSinglePath(item.id, idx, e.target.value)
+                              }
+                              placeholder="prod/apps-sehir/app/sehir"
+                              className="flex-1 bg-slate-950 border border-slate-800 hover:border-slate-700 focus:border-cyan-500 text-cyan-300 font-mono text-[11px] px-2.5 py-1 rounded focus:outline-none transition-colors"
+                              title="Hedef Vault yolunu el ile düzenleyin"
+                            />
+                            {item.targetPaths.length > 1 && (
+                              <button
+                                type="button"
+                                onClick={() => handleRemoveSinglePath(item.id, idx)}
+                                className="p-1 text-slate-500 hover:text-rose-400 rounded opacity-60 group-hover:opacity-100 transition-opacity"
+                                title="Bu konumu kaldır"
+                              >
+                                <Trash2 className="w-3 h-3" />
+                              </button>
+                            )}
+                          </div>
+                        ))}
+
+                        {/* Inline Path Quick Controls */}
+                        <div className="flex items-center gap-3 pt-0.5 text-[11px] pl-6 font-sans">
+                          <button
+                            type="button"
+                            onClick={() => handleAddPathToFile(item.id)}
+                            className="text-cyan-400 hover:text-cyan-300 flex items-center gap-1 font-medium hover:underline"
+                            title="Bu dosya için ek hedef konum ekle"
+                          >
+                            <Plus className="w-3 h-3" />
+                            <span>+ Konum Ekle</span>
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => handleResetFilePaths(item.id)}
+                            className="text-slate-500 hover:text-slate-300 flex items-center gap-1 hover:underline"
+                            title="Otomatik oluşturulan varsayılan konuma sıfırla"
+                          >
+                            <RotateCcw className="w-2.5 h-2.5" />
+                            <span>Sıfırla</span>
+                          </button>
+                        </div>
+                      </td>
+
+                      {/* Status / Actions */}
+                      <td className="p-3 text-right">
+                        <div className="flex items-center justify-end gap-2">
+                          {item.status === 'pending' && (
+                            <span className="text-slate-400 text-[11px]">Bekliyor</span>
+                          )}
+                          {item.status === 'uploading' && (
+                            <span className="text-cyan-400 text-[11px] flex items-center gap-1">
+                              <RotateCcw className="w-3 h-3 animate-spin" />
+                              Yükleniyor
+                            </span>
+                          )}
+                          {item.status === 'success' && (
+                            <span className="text-emerald-400 text-[11px] flex items-center gap-1">
+                              <CheckCircle2 className="w-3 h-3" />
+                              Yüklendi
+                            </span>
+                          )}
+                          {item.status === 'error' && (
+                            <span className="text-rose-400 text-[11px] flex items-center gap-1">
+                              <AlertTriangle className="w-3 h-3" />
+                              Hata
+                            </span>
+                          )}
+
+                          <button
+                            type="button"
+                            onClick={() => setPreviewItem(item)}
+                            title="İçeriği Önizle"
+                            className="p-1 text-slate-400 hover:text-slate-200 rounded"
+                          >
+                            <Eye className="w-3.5 h-3.5" />
+                          </button>
+
+                          <button
+                            type="button"
+                            onClick={() => handleRemoveFile(item.id)}
+                            title="Listeden Çıkar"
+                            className="p-1 text-slate-500 hover:text-rose-400 rounded"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           </div>
         )}
 
-        {/* Action Button */}
+        {/* Action Button & Summary Bar */}
         {files.length > 0 && (
-          <div className="p-4 bg-slate-950 border-t border-slate-800 flex items-center justify-between">
-            <div className="text-xs text-slate-400">
-              <span>Toplam: {files.length} dosya</span>
+          <div className="p-4 bg-slate-950 border-t border-slate-800 flex flex-wrap items-center justify-between gap-3">
+            <div className="text-xs text-slate-400 space-x-2">
+              <span>Seçili: <strong className="text-cyan-300 font-mono">{selectedFiles.length}</strong> / {files.length} dosya</span>
               {completedCount > 0 && (
-                <span className="ml-3 text-cyan-400 font-mono">
-                  ({completedCount} / {files.length} tamamlandı)
+                <span className="text-emerald-400 font-mono">
+                  ({completedCount} / {selectedFiles.length} tamamlandı)
                 </span>
               )}
             </div>
@@ -617,7 +983,7 @@ export const BatchUploader: React.FC<BatchUploaderProps> = ({
 
               <button
                 onClick={handleStartBatchUpload}
-                disabled={isProcessing}
+                disabled={isProcessing || selectedFiles.length === 0}
                 className="px-6 py-2 bg-cyan-500 hover:bg-cyan-400 text-slate-950 font-bold text-xs rounded transition-colors flex items-center gap-2 shadow-sm disabled:opacity-50"
               >
                 {isProcessing ? (
@@ -628,7 +994,7 @@ export const BatchUploader: React.FC<BatchUploaderProps> = ({
                 ) : (
                   <>
                     <Play className="w-4 h-4 fill-current" />
-                    <span>Sunuculara Yüklemeyi Başlat</span>
+                    <span>Seçili Dosyaları ({selectedFiles.length}) Vault'a Yükle</span>
                   </>
                 )}
               </button>
@@ -710,6 +1076,150 @@ export const BatchUploader: React.FC<BatchUploaderProps> = ({
                 Tamam
               </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* Batch Path Editor Modal */}
+      {showBatchPathModal && (
+        <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-xs flex items-center justify-center p-4 z-50">
+          <div className="bg-slate-900 border border-slate-700 rounded-xl max-w-lg w-full p-5 space-y-4 shadow-2xl animate-in fade-in zoom-in-95">
+            <div className="flex items-center justify-between pb-3 border-b border-slate-800">
+              <div className="flex items-center gap-2">
+                <Sliders className="w-5 h-5 text-indigo-400" />
+                <h2 className="text-sm font-semibold text-slate-100">
+                  Toplu Konum Düzenleyici / Şablon Uygulayıcı
+                </h2>
+              </div>
+              <button
+                onClick={() => setShowBatchPathModal(false)}
+                className="text-slate-400 hover:text-slate-200"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Tabs: Template vs Find/Replace */}
+            <div className="flex border-b border-slate-800">
+              <button
+                type="button"
+                onClick={() => setBatchModalTab('template')}
+                className={`flex-1 py-2 text-xs font-semibold text-center border-b-2 transition-colors ${
+                  batchModalTab === 'template'
+                    ? 'border-indigo-400 text-indigo-300'
+                    : 'border-transparent text-slate-400 hover:text-slate-200'
+                }`}
+              >
+                Şablon ile Yeniden Üret
+              </button>
+              <button
+                type="button"
+                onClick={() => setBatchModalTab('replace')}
+                className={`flex-1 py-2 text-xs font-semibold text-center border-b-2 transition-colors ${
+                  batchModalTab === 'replace'
+                    ? 'border-indigo-400 text-indigo-300'
+                    : 'border-transparent text-slate-400 hover:text-slate-200'
+                }`}
+              >
+                Bul ve Değiştir
+              </button>
+            </div>
+
+            {batchModalTab === 'template' ? (
+              <div className="space-y-3">
+                <div className="text-xs text-slate-400">
+                  Yüklü tüm dosyaların hedef Vault konumlarını aşağıdaki dinamik şablona göre günceller:
+                </div>
+
+                <div className="space-y-1">
+                  <label className="text-xs text-slate-300 font-medium">Hedef Konum Şablonu:</label>
+                  <input
+                    type="text"
+                    value={templatePattern}
+                    onChange={(e) => setTemplatePattern(e.target.value)}
+                    placeholder="{env}/apps-{city}/{app}/{city}"
+                    className="w-full bg-slate-950 border border-slate-800 focus:border-indigo-500 rounded px-3 py-2 font-mono text-xs text-cyan-300 focus:outline-none"
+                  />
+                  <div className="flex items-center gap-1.5 flex-wrap pt-1 text-[11px] text-slate-400">
+                    <span>Değişkenler:</span>
+                    <code className="text-indigo-300 font-mono">&#123;env&#125;</code>
+                    <code className="text-indigo-300 font-mono">&#123;city&#125;</code>
+                    <code className="text-indigo-300 font-mono">&#123;app&#125;</code>
+                    <code className="text-indigo-300 font-mono">&#123;user&#125;</code>
+                  </div>
+                </div>
+
+                <div className="bg-slate-950 p-3 rounded border border-slate-800 text-xs space-y-1 font-mono">
+                  <span className="text-slate-500 block text-[11px] font-sans">Örnek Önizleme (tekirdag için):</span>
+                  <span className="text-emerald-400">
+                    {connection.engine}/
+                    {templatePattern
+                      .replace(/\{env\}/g, connection.selectedEnv)
+                      .replace(/\{city\}/g, 'tekirdag')
+                      .replace(/\{app\}/g, connection.appName || 'afc-saas-api')
+                      .replace(/\{user\}/g, connection.username || 'test-user')}
+                  </span>
+                </div>
+
+                <div className="flex justify-end gap-2 pt-2">
+                  <button
+                    onClick={() => setShowBatchPathModal(false)}
+                    className="px-3 py-1.5 text-xs text-slate-400 hover:text-slate-200"
+                  >
+                    Vazgeç
+                  </button>
+                  <button
+                    onClick={handleApplyBatchTemplate}
+                    className="px-4 py-1.5 bg-indigo-600 hover:bg-indigo-500 text-white font-semibold text-xs rounded transition-colors"
+                  >
+                    Tüm Dosyalara Uygula
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <div className="space-y-3">
+                <div className="text-xs text-slate-400">
+                  Tüm dosyalardaki hedef path'lerin içinde belirli bir metni arayıp değiştirin:
+                </div>
+
+                <div>
+                  <label className="text-xs text-slate-300 font-medium block mb-1">Aranan Metin:</label>
+                  <input
+                    type="text"
+                    value={findText}
+                    onChange={(e) => setFindText(e.target.value)}
+                    placeholder="örn: afc-saas-api"
+                    className="w-full bg-slate-950 border border-slate-800 rounded px-3 py-1.5 font-mono text-xs text-slate-200 focus:outline-none focus:border-indigo-500"
+                  />
+                </div>
+
+                <div>
+                  <label className="text-xs text-slate-300 font-medium block mb-1">Yeni Metin (Değiştirilecek):</label>
+                  <input
+                    type="text"
+                    value={replaceText}
+                    onChange={(e) => setReplaceText(e.target.value)}
+                    placeholder="örn: afc-saas-core"
+                    className="w-full bg-slate-950 border border-slate-800 rounded px-3 py-1.5 font-mono text-xs text-slate-200 focus:outline-none focus:border-indigo-500"
+                  />
+                </div>
+
+                <div className="flex justify-end gap-2 pt-2">
+                  <button
+                    onClick={() => setShowBatchPathModal(false)}
+                    className="px-3 py-1.5 text-xs text-slate-400 hover:text-slate-200"
+                  >
+                    Vazgeç
+                  </button>
+                  <button
+                    onClick={handleApplyFindReplace}
+                    className="px-4 py-1.5 bg-indigo-600 hover:bg-indigo-500 text-white font-semibold text-xs rounded transition-colors"
+                  >
+                    Değiştir ve Uygula
+                  </button>
+                </div>
+              </div>
+            )}
           </div>
         </div>
       )}
