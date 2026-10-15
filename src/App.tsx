@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { VaultConnection, LogEntry } from './types/vault';
 import { TopBar } from './components/TopBar';
 import { SecretExplorer } from './components/SecretExplorer';
@@ -79,7 +79,7 @@ export default function App() {
   }, [logs]);
 
   // Add Log Entry
-  const addLog = (
+  const addLog = useCallback((
     type: 'info' | 'success' | 'warning' | 'error',
     message: string,
     details?: string
@@ -92,11 +92,11 @@ export default function App() {
       details,
     };
     setLogs((prev) => [newEntry, ...prev.slice(0, 199)]);
-  };
+  }, []);
 
-  const updateConnection = (updated: Partial<VaultConnection>) => {
+  const updateConnection = useCallback((updated: Partial<VaultConnection>) => {
     setConnection((prev) => ({ ...prev, ...updated }));
-  };
+  }, []);
 
   const toggleDemoMode = () => {
     const nextMode = !connection.isDemoMode;

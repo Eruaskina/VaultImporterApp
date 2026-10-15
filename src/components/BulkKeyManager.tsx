@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo, useCallback } from 'react';
+import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import {
   VaultConnection,
   VaultEnvironment,
@@ -91,6 +91,17 @@ export const BulkKeyManager: React.FC<BulkKeyManagerProps> = ({
     [allAppFiles]
   );
 
+  // Stable refs for callbacks to prevent cascading re-render loops
+  const onAddLogRef = useRef(onAddLog);
+  useEffect(() => {
+    onAddLogRef.current = onAddLog;
+  }, [onAddLog]);
+
+  const onUpdateConnectionRef = useRef(onUpdateConnection);
+  useEffect(() => {
+    onUpdateConnectionRef.current = onUpdateConnection;
+  }, [onUpdateConnection]);
+
   // Active connection memo with dynamic engine and environment
   const activeConnection = useMemo<VaultConnection>(() => {
     return {
@@ -99,7 +110,15 @@ export const BulkKeyManager: React.FC<BulkKeyManagerProps> = ({
       selectedEnv,
       appName: selectedApp,
     };
-  }, [connection, selectedEngine, selectedEnv, selectedApp]);
+  }, [
+    connection.url,
+    connection.token,
+    connection.engine,
+    connection.isDemoMode,
+    selectedEngine,
+    selectedEnv,
+    selectedApp,
+  ]);
 
   // Loaded Secret Data per File
   const [citySecrets, setCitySecrets] = useState<CitySecretRef[]>([]);
@@ -167,7 +186,7 @@ export const BulkKeyManager: React.FC<BulkKeyManagerProps> = ({
         setAllAppFiles(files);
         const fileIds = files.map((f) => f.id);
         setSelectedFileIds(fileIds);
-        onAddLog(
+        onAddLogRef.current(
           'info',
           `"${app}" altındaki dosyalar listelendi (${env} ortamı)`,
           files.length > 0
@@ -175,12 +194,12 @@ export const BulkKeyManager: React.FC<BulkKeyManagerProps> = ({
             : 'Bu uygulama için henüz dosya bulunamadı.'
         );
       } catch (err: any) {
-        onAddLog('warning', 'Dosyalar listelenirken hata', err.message);
+        onAddLogRef.current('warning', 'Dosyalar listelenirken hata', err.message);
       } finally {
         setIsLoadingSecrets(false);
       }
     },
-    [activeConnection, onAddLog]
+    [activeConnection]
   );
 
   // Scout existing apps from Vault across all environments
@@ -202,26 +221,33 @@ export const BulkKeyManager: React.FC<BulkKeyManagerProps> = ({
 
       if (res.detectedEngine && res.detectedEngine !== selectedEngine) {
         setSelectedEngine(res.detectedEngine);
-        onUpdateConnection?.({ engine: res.detectedEngine });
+        onUpdateConnectionRef.current?.({ engine: res.detectedEngine });
       }
 
       await loadAppFiles(targetApp, selectedEnv);
     } catch (err: any) {
-      onAddLog('warning', 'Vault keşfi sırasında uyarı', err.message);
+      onAddLogRef.current('warning', 'Vault keşfi sırasında uyarı', err.message);
     } finally {
       setIsScouting(false);
     }
-  }, [activeConnection, selectedEnv, selectedApp, selectedEngine, loadAppFiles, onAddLog, onUpdateConnection]);
+  }, [activeConnection, selectedEnv, selectedApp, selectedEngine, loadAppFiles]);
 
+  // Scout vault on mount or when environment changes
   useEffect(() => {
     handleScoutVault();
-  }, [selectedEnv, selectedEngine]);
+  }, [selectedEnv]);
 
+  // When user manually selects another app or engine, reload files
+  const isFirstMount = useRef(true);
   useEffect(() => {
+    if (isFirstMount.current) {
+      isFirstMount.current = false;
+      return;
+    }
     if (selectedApp) {
       loadAppFiles(selectedApp, selectedEnv);
     }
-  }, [selectedApp, selectedEnv, selectedEngine, loadAppFiles]);
+  }, [selectedApp, selectedEngine]);
 
   // Load Secrets for Selected Files
   const handleLoadSecrets = useCallback(async () => {
@@ -293,21 +319,29 @@ export const BulkKeyManager: React.FC<BulkKeyManagerProps> = ({
     setSelectedKeyPaths([]); // Reset selection on fresh load
 
     const loadedCount = results.filter((r) => r.status === 'success').length;
-    onAddLog(
+    onAddLogRef.current(
       'info',
       `Dosya secret'ları yüklendi (${loadedCount}/${filesToLoad.length})`,
       `Uygulama: ${selectedApp}, Ortam: ${selectedEnv}, Engine: ${selectedEngine}`
     );
-  }, [allAppFiles, selectedFileIds, selectedApp, selectedEnv, selectedEngine, activeConnection, onAddLog]);
+  }, [allAppFiles, selectedFileIds, selectedApp, selectedEnv, selectedEngine, activeConnection]);
 
-  // Auto load when selected files change
+  const selectedFilesKey = useMemo(() => selectedFileIds.slice().sort().join(','), [selectedFileIds]);
+  const allFilesKey = useMemo(() => allAppFiles.map((f) => f.path).join(','), [allAppFiles]);
+
+  const handleLoadSecretsRef = useRef(handleLoadSecrets);
   useEffect(() => {
-    if (selectedFileIds.length > 0) {
-      handleLoadSecrets();
-    } else {
+    handleLoadSecretsRef.current = handleLoadSecrets;
+  });
+
+  // Auto load when selected files change or when files list is populated
+  useEffect(() => {
+    if (selectedFilesKey && allFilesKey) {
+      handleLoadSecretsRef.current();
+    } else if (!selectedFilesKey) {
       setCitySecrets([]);
     }
-  }, [selectedFileIds, allAppFiles, handleLoadSecrets]);
+  }, [selectedFilesKey, allFilesKey]);
 
   // Aggregate keys across loaded city secrets
   const aggregatedKeys: AggregatedKeyRow[] = useMemo(() => {

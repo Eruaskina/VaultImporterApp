@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { VaultConnection, SecretData } from '../types/vault';
 import { VaultApiService } from '../services/vaultApi';
 import { SecretEditor } from './SecretEditor';
@@ -29,6 +29,12 @@ export const SecretExplorer: React.FC<SecretExplorerProps> = ({ connection, onAd
   const [loading, setLoading] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
 
+  // Stable ref for onAddLog
+  const onAddLogRef = useRef(onAddLog);
+  useEffect(() => {
+    onAddLogRef.current = onAddLog;
+  }, [onAddLog]);
+
   // Selected Secret for editing
   const [selectedSecretPath, setSelectedSecretPath] = useState<string | null>(null);
   const [secretData, setSecretData] = useState<SecretData | null>(null);
@@ -50,15 +56,15 @@ export const SecretExplorer: React.FC<SecretExplorerProps> = ({ connection, onAd
           setItems(res.keys || []);
         } else {
           setItems([]);
-          onAddLog('warning', `Dizin listelenemedi (${path || 'root'}): ${res.error}`);
+          onAddLogRef.current('warning', `Dizin listelenemedi (${path || 'root'}): ${res.error}`);
         }
       } catch (err: any) {
-        onAddLog('error', `Hata: ${err.message}`);
+        onAddLogRef.current('error', `Hata: ${err.message}`);
       } finally {
         setLoading(false);
       }
     },
-    [connection, onAddLog]
+    [connection.url, connection.token, connection.engine, connection.isDemoMode]
   );
 
   // Initial load and reload on engine change
