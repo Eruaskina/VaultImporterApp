@@ -336,7 +336,7 @@ app.post('/api/vault/read', async (req: Request, res: Response) => {
 
 // 4.5 Discover all applications and cities across all environments and candidate engines in Vault
 app.post('/api/vault/discover', async (req: Request, res: Response) => {
-  const { url, token, engine = 'asis', namespace } = req.body;
+  const { url, token, engine = 'asis', namespace, env = 'prod' } = req.body;
   if (!url || !token) {
     res.status(400).json({ success: false, message: 'URL ve Token gereklidir.' });
     return;
@@ -345,24 +345,31 @@ app.post('/api/vault/discover', async (req: Request, res: Response) => {
   const candidateEngines = Array.from(new Set([engine, 'secret', 'asis', 'secrets'].filter(Boolean)));
   const discoveredApps = new Set<string>();
   const discoveredCities = new Set<string>();
+  const appCitiesMap: Record<string, Set<string>> = {};
+  const envAppCitiesMap: Record<string, Record<string, Set<string>>> = {};
   let activeEngine = engine;
 
   for (const eng of candidateEngines) {
     try {
       // 1. Inspect engine root
       const rootKeys = await vaultListDirect(url, eng, '', token, namespace);
-      const envsToCheck = new Set<string>(['prod', 'test', 'dev']);
+      const envsToCheck = new Set<string>([env, 'prod', 'test', 'dev'].filter(Boolean));
 
       for (const rk of rootKeys) {
         const cleanRk = rk.replace(/\/$/, '');
         if (['prod', 'test', 'dev'].includes(cleanRk.toLowerCase())) {
           envsToCheck.add(cleanRk);
         } else if (cleanRk.startsWith('apps-')) {
-          discoveredCities.add(cleanRk.toLowerCase());
+          const cityLower = cleanRk.toLowerCase();
+          discoveredCities.add(cityLower);
           const appKeys = await vaultListDirect(url, eng, cleanRk, token, namespace);
           for (const ak of appKeys) {
             const app = ak.replace(/\/$/, '');
-            if (app && app !== cleanRk.replace(/^apps-/, '')) discoveredApps.add(app);
+            if (app && app !== cleanRk.replace(/^apps-/, '') && !app.endsWith('.json')) {
+              discoveredApps.add(app);
+              if (!appCitiesMap[app]) appCitiesMap[app] = new Set();
+              appCitiesMap[app].add(cityLower);
+            }
           }
         }
       }
@@ -373,15 +380,22 @@ app.post('/api/vault/discover', async (req: Request, res: Response) => {
         for (const ek of envKeys) {
           const cleanEk = ek.replace(/\/$/, '');
           if (cleanEk.startsWith('apps-')) {
-            // E.g. apps-tekirdag, apps-istanbul
-            discoveredCities.add(cleanEk.toLowerCase());
+            const cityLower = cleanEk.toLowerCase();
+            discoveredCities.add(cityLower);
 
-            // e.g. prod/apps-tekirdag -> list to get application names!
+            // e.g. prod/apps-tekirdag -> list to get application names inside this city!
             const appKeys = await vaultListDirect(url, eng, `${envFolder}/${cleanEk}`, token, namespace);
             for (const ak of appKeys) {
               const app = ak.replace(/\/$/, '');
               if (app && app !== cleanEk.replace(/^apps-/, '') && !app.endsWith('.json')) {
                 discoveredApps.add(app);
+
+                if (!appCitiesMap[app]) appCitiesMap[app] = new Set();
+                appCitiesMap[app].add(cityLower);
+
+                if (!envAppCitiesMap[envFolder]) envAppCitiesMap[envFolder] = {};
+                if (!envAppCitiesMap[envFolder][app]) envAppCitiesMap[envFolder][app] = new Set();
+                envAppCitiesMap[envFolder][app].add(cityLower);
               }
             }
           } else if (cleanEk) {
@@ -395,6 +409,13 @@ app.post('/api/vault/discover', async (req: Request, res: Response) => {
                 const cleanSk = sk.replace(/\/$/, '').toLowerCase();
                 if (cleanSk.startsWith('apps-')) {
                   discoveredCities.add(cleanSk);
+
+                  if (!appCitiesMap[cleanEk]) appCitiesMap[cleanEk] = new Set();
+                  appCitiesMap[cleanEk].add(cleanSk);
+
+                  if (!envAppCitiesMap[envFolder]) envAppCitiesMap[envFolder] = {};
+                  if (!envAppCitiesMap[envFolder][cleanEk]) envAppCitiesMap[envFolder][cleanEk] = new Set();
+                  envAppCitiesMap[envFolder][cleanEk].add(cleanSk);
                 }
               }
             }
@@ -411,15 +432,34 @@ app.post('/api/vault/discover', async (req: Request, res: Response) => {
     }
   }
 
-  // Ensure default standards are included so UI always has choices
-  ['afc-saas-api', 'afc-saas'].forEach((a) => discoveredApps.add(a));
-  ['apps-tekirdag', 'apps-istanbul', 'apps-ankara', 'apps-izmir', 'apps-bursa'].forEach((c) => discoveredCities.add(c));
+  // Only provide default fallback if NOTHING was discovered in Vault (e.g. empty Vault)
+  if (discoveredApps.size === 0 && discoveredCities.size === 0) {
+    discoveredApps.add('afc-saas-api');
+    discoveredCities.add('apps-tekirdag');
+    appCitiesMap['afc-saas-api'] = new Set(['apps-tekirdag']);
+  }
+
+  // Serialize sets to sorted arrays
+  const serializedAppCitiesMap: Record<string, string[]> = {};
+  for (const [app, cities] of Object.entries(appCitiesMap)) {
+    serializedAppCitiesMap[app] = Array.from(cities).sort();
+  }
+
+  const serializedEnvAppCitiesMap: Record<string, Record<string, string[]>> = {};
+  for (const [e, aMap] of Object.entries(envAppCitiesMap)) {
+    serializedEnvAppCitiesMap[e] = {};
+    for (const [app, cities] of Object.entries(aMap)) {
+      serializedEnvAppCitiesMap[e][app] = Array.from(cities).sort();
+    }
+  }
 
   res.json({
     success: true,
     engine: activeEngine,
     apps: Array.from(discoveredApps).sort(),
     cities: Array.from(discoveredCities).sort(),
+    appCitiesMap: serializedAppCitiesMap,
+    envAppCitiesMap: serializedEnvAppCitiesMap,
   });
 });
 

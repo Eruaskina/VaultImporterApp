@@ -297,14 +297,18 @@ export class VaultApiService {
 
   /**
    * Discovers all existing apps and cities from Vault or Mock store.
-   * Scans across environments (prod, test, dev) and engines to find every application and apps-sehir folder.
+   * Maps which applications actually exist in which apps-sehir folders.
    */
   static async discoverAppsAndCities(
     conn: VaultConnection,
     env: VaultEnvironment
-  ): Promise<{ apps: string[]; cities: string[]; detectedEngine?: string }> {
-    const defaultCities = ['apps-tekirdag', 'apps-istanbul', 'apps-ankara', 'apps-izmir', 'apps-bursa'];
-    const defaultApps = ['afc-saas-api', 'afc-saas'];
+  ): Promise<{
+    apps: string[];
+    cities: string[];
+    appCitiesMap: Record<string, string[]>;
+    detectedEngine?: string;
+  }> {
+    const appCitiesMap: Record<string, Set<string>> = {};
 
     if (conn.isDemoMode) {
       const engines = MockVaultService.getEngines();
@@ -318,26 +322,37 @@ export class VaultApiService {
           const regex1 = /(?:^|\/)(?:prod|test|dev)\/(apps-[^/]+)\/([^/]+)/i;
           const match1 = p.match(regex1);
           if (match1) {
-            citiesSet.add(match1[1].toLowerCase());
-            appsSet.add(match1[2]);
+            const city = match1[1].toLowerCase();
+            const app = match1[2];
+            citiesSet.add(city);
+            appsSet.add(app);
+            if (!appCitiesMap[app]) appCitiesMap[app] = new Set();
+            appCitiesMap[app].add(city);
           }
 
           // Check direct pattern: (apps-{city})/{app}
           const regex2 = /(?:^|\/)(apps-[^/]+)\/([^/]+)/i;
           const match2 = p.match(regex2);
           if (match2) {
-            citiesSet.add(match2[1].toLowerCase());
-            appsSet.add(match2[2]);
+            const city = match2[1].toLowerCase();
+            const app = match2[2];
+            citiesSet.add(city);
+            appsSet.add(app);
+            if (!appCitiesMap[app]) appCitiesMap[app] = new Set();
+            appCitiesMap[app].add(city);
           }
         }
       }
 
-      defaultCities.forEach((c) => citiesSet.add(c));
-      defaultApps.forEach((a) => appsSet.add(a));
+      const serializedMap: Record<string, string[]> = {};
+      for (const [app, cities] of Object.entries(appCitiesMap)) {
+        serializedMap[app] = Array.from(cities).sort();
+      }
 
       return {
         cities: Array.from(citiesSet).sort(),
         apps: Array.from(appsSet).sort(),
+        appCitiesMap: serializedMap,
         detectedEngine: conn.engine,
       };
     }
@@ -352,15 +367,24 @@ export class VaultApiService {
           token: conn.token,
           engine: conn.engine,
           namespace: conn.namespace,
+          env,
         }),
       });
 
       if (res.ok) {
         const data = await res.json();
         if (data.success && (data.apps?.length > 0 || data.cities?.length > 0)) {
+          let resolvedAppCities: Record<string, string[]> = {};
+          if (data.envAppCitiesMap && data.envAppCitiesMap[env]) {
+            resolvedAppCities = data.envAppCitiesMap[env];
+          } else if (data.appCitiesMap) {
+            resolvedAppCities = data.appCitiesMap;
+          }
+
           return {
-            apps: data.apps || defaultApps,
-            cities: data.cities || defaultCities,
+            apps: data.apps || [],
+            cities: data.cities || [],
+            appCitiesMap: resolvedAppCities,
             detectedEngine: data.engine || conn.engine,
           };
         }
@@ -369,7 +393,7 @@ export class VaultApiService {
       // Fallback to client-side list queries below
     }
 
-    // 2. Client-side fallback discovery across all environments
+    // 2. Client-side fallback discovery across environments
     try {
       const citiesSet = new Set<string>();
       const appsSet = new Set<string>();
@@ -382,15 +406,18 @@ export class VaultApiService {
           for (const k of rootRes.keys) {
             const cleanKey = k.replace(/\/$/, '');
             if (cleanKey.startsWith('apps-')) {
-              citiesSet.add(cleanKey.toLowerCase());
+              const cityLower = cleanKey.toLowerCase();
+              citiesSet.add(cityLower);
 
               // Probe this city for applications
               const cityRes = await this.listPath(conn, `${targetEnv}/${cleanKey}`);
               if (cityRes.success && cityRes.keys) {
                 for (const ak of cityRes.keys) {
                   const appName = ak.replace(/\/$/, '');
-                  if (appName && appName !== cleanKey.replace(/^apps-/, '')) {
+                  if (appName && appName !== cleanKey.replace(/^apps-/, '') && !appName.endsWith('.json')) {
                     appsSet.add(appName);
+                    if (!appCitiesMap[appName]) appCitiesMap[appName] = new Set();
+                    appCitiesMap[appName].add(cityLower);
                   }
                 }
               }
@@ -399,24 +426,36 @@ export class VaultApiService {
               const subRes = await this.listPath(conn, `${targetEnv}/${cleanKey}`);
               if (subRes.success && subRes.keys && subRes.keys.length > 0) {
                 appsSet.add(cleanKey);
+                for (const sk of subRes.keys) {
+                  const cleanSk = sk.replace(/\/$/, '').toLowerCase();
+                  if (cleanSk.startsWith('apps-')) {
+                    citiesSet.add(cleanSk);
+                    if (!appCitiesMap[cleanKey]) appCitiesMap[cleanKey] = new Set();
+                    appCitiesMap[cleanKey].add(cleanSk);
+                  }
+                }
               }
             }
           }
         }
       }
 
-      defaultCities.forEach((c) => citiesSet.add(c));
-      defaultApps.forEach((a) => appsSet.add(a));
+      const serializedMap: Record<string, string[]> = {};
+      for (const [app, cities] of Object.entries(appCitiesMap)) {
+        serializedMap[app] = Array.from(cities).sort();
+      }
 
       return {
         cities: Array.from(citiesSet).sort(),
         apps: Array.from(appsSet).sort(),
+        appCitiesMap: serializedMap,
         detectedEngine: conn.engine,
       };
     } catch {
       return {
-        cities: defaultCities,
-        apps: defaultApps,
+        cities: [],
+        apps: [],
+        appCitiesMap: {},
         detectedEngine: conn.engine,
       };
     }
