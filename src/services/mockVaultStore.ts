@@ -346,6 +346,146 @@ const initialStore: Record<string, Record<string, StoredSecret>> = {
         },
       },
     },
+    'test/apps-tekirdag/afc-saas-api/tekirdag': {
+      current_version: 1,
+      metadata: {
+        current_version: 1,
+        oldest_version: 1,
+        created_time: new Date(Date.now() - 3600000 * 2).toISOString(),
+        updated_time: new Date(Date.now() - 3600000 * 2).toISOString(),
+        versions: {
+          '1': { version: 1, created_time: new Date(Date.now() - 3600000 * 2).toISOString() },
+        },
+      },
+      versions: {
+        1: {
+          created_time: new Date(Date.now() - 3600000 * 2).toISOString(),
+          data: {
+            appsettings: {
+              Logging: { LogLevel: { Default: 'Debug', 'Microsoft.AspNetCore': 'Information' } },
+              ConnectionStrings: {
+                DefaultConnection: 'Server=10.240.59.10;Database=AfcTekirdag_Test;User Id=test_usr;Password=TestP@ss2026;',
+              },
+              CityConfig: { Code: '59', Name: 'Tekirdag', Active: true, MaxWorkers: 50, TimeoutSec: 45 },
+              JwtSettings: { Issuer: 'AfcAuthIssuer', SecretKey: 'JwtKeyTekTest2026!', ExpiryMinutes: 60 },
+              AppSettings: { EnableAuditLog: true, Environment: 'Test' },
+            },
+          },
+        },
+      },
+    },
+    'test/apps-istanbul/afc-saas-api/istanbul': {
+      current_version: 1,
+      metadata: {
+        current_version: 1,
+        oldest_version: 1,
+        created_time: new Date(Date.now() - 3600000 * 3).toISOString(),
+        updated_time: new Date(Date.now() - 3600000 * 3).toISOString(),
+        versions: {
+          '1': { version: 1, created_time: new Date(Date.now() - 3600000 * 3).toISOString() },
+        },
+      },
+      versions: {
+        1: {
+          created_time: new Date(Date.now() - 3600000 * 3).toISOString(),
+          data: {
+            appsettings: {
+              Logging: { LogLevel: { Default: 'Debug', 'Microsoft.AspNetCore': 'Information' } },
+              ConnectionStrings: {
+                DefaultConnection: 'Server=10.240.20.15;Database=AfcIstanbul_Test;Uid=test_usr;Pwd=TestP@ss2026;',
+              },
+              CityConfig: { Code: '34', Name: 'Istanbul', MaxWorkers: 100, Active: true, TimeoutSec: 45 },
+              JwtSettings: { Issuer: 'AfcAuthIssuer', SecretKey: 'JwtKeyIstTest2026!', ExpiryMinutes: 60 },
+              AppSettings: { EnableAuditLog: true, Environment: 'Test' },
+            },
+          },
+        },
+      },
+    },
+    'test/apps-ankara/afc-saas-api/ankara': {
+      current_version: 1,
+      metadata: {
+        current_version: 1,
+        oldest_version: 1,
+        created_time: new Date(Date.now() - 3600000 * 3).toISOString(),
+        updated_time: new Date(Date.now() - 3600000 * 3).toISOString(),
+        versions: {
+          '1': { version: 1, created_time: new Date(Date.now() - 3600000 * 3).toISOString() },
+        },
+      },
+      versions: {
+        1: {
+          created_time: new Date(Date.now() - 3600000 * 3).toISOString(),
+          data: {
+            appsettings: {
+              Logging: { LogLevel: { Default: 'Debug', 'Microsoft.AspNetCore': 'Information' } },
+              ConnectionStrings: {
+                DefaultConnection: 'Server=10.240.10.88;Database=AfcAnkara_Test;Uid=test_usr;Pwd=TestP@ss2026;',
+              },
+              CityConfig: { Code: '06', Name: 'Ankara', MaxWorkers: 80, Active: true, TimeoutSec: 45 },
+              JwtSettings: { Issuer: 'AfcAuthIssuer', SecretKey: 'JwtKeyAnkTest2026!', ExpiryMinutes: 60 },
+              AppSettings: { EnableAuditLog: true, Environment: 'Test' },
+            },
+          },
+        },
+      },
+    },
+    'test/apps-izmir/afc-saas-api/izmir': {
+      current_version: 1,
+      metadata: {
+        current_version: 1,
+        oldest_version: 1,
+        created_time: new Date(Date.now() - 3600000 * 3).toISOString(),
+        updated_time: new Date(Date.now() - 3600000 * 3).toISOString(),
+        versions: {
+          '1': { version: 1, created_time: new Date(Date.now() - 3600000 * 3).toISOString() },
+        },
+      },
+      versions: {
+        1: {
+          created_time: new Date(Date.now() - 3600000 * 3).toISOString(),
+          data: {
+            appsettings: {
+              Logging: { LogLevel: { Default: 'Debug', 'Microsoft.AspNetCore': 'Information' } },
+              ConnectionStrings: {
+                DefaultConnection: 'Server=10.240.30.12;Database=AfcIzmir_Test;Uid=test_usr;Pwd=TestP@ss2026;',
+              },
+              CityConfig: { Code: '35', Name: 'Izmir', MaxWorkers: 90, Active: true, TimeoutSec: 45 },
+              JwtSettings: { Issuer: 'AfcAuthIssuer', SecretKey: 'JwtKeyIzmTest2026!', ExpiryMinutes: 60 },
+              AppSettings: { EnableAuditLog: true, Environment: 'Test' },
+            },
+          },
+        },
+      },
+    },
+    'test/apps-bursa/afc-saas-api/bursa': {
+      current_version: 1,
+      metadata: {
+        current_version: 1,
+        oldest_version: 1,
+        created_time: new Date(Date.now() - 3600000 * 3).toISOString(),
+        updated_time: new Date(Date.now() - 3600000 * 3).toISOString(),
+        versions: {
+          '1': { version: 1, created_time: new Date(Date.now() - 3600000 * 3).toISOString() },
+        },
+      },
+      versions: {
+        1: {
+          created_time: new Date(Date.now() - 3600000 * 3).toISOString(),
+          data: {
+            appsettings: {
+              Logging: { LogLevel: { Default: 'Debug', 'Microsoft.AspNetCore': 'Information' } },
+              ConnectionStrings: {
+                DefaultConnection: 'Server=10.240.16.20;Database=AfcBursa_Test;Uid=test_usr;Pwd=TestP@ss2026;',
+              },
+              CityConfig: { Code: '16', Name: 'Bursa', MaxWorkers: 60, Active: true, TimeoutSec: 45 },
+              JwtSettings: { Issuer: 'AfcAuthIssuer', SecretKey: 'JwtKeyBurTest2026!', ExpiryMinutes: 60 },
+              AppSettings: { EnableAuditLog: true, Environment: 'Test' },
+            },
+          },
+        },
+      },
+    },
   },
   secret: {
     'prod/apps-istanbul/afc-saas-api/istanbul': {

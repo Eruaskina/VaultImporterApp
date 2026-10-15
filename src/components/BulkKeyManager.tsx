@@ -40,12 +40,14 @@ import {
   Code2,
   Table as TableIcon,
   Sparkles,
+  Database,
 } from 'lucide-react';
 
 interface BulkKeyManagerProps {
   connection: VaultConnection;
   onAddLog: (type: 'info' | 'success' | 'warning' | 'error', message: string, details?: string) => void;
   onNavigateToExplorer?: (path?: string) => void;
+  onUpdateConnection?: (updated: Partial<VaultConnection>) => void;
 }
 
 interface NewKeyRowInput {
@@ -59,9 +61,12 @@ export const BulkKeyManager: React.FC<BulkKeyManagerProps> = ({
   connection,
   onAddLog,
   onNavigateToExplorer,
+  onUpdateConnection,
 }) => {
   // Configuration State
   const [selectedEnv, setSelectedEnv] = useState<VaultEnvironment>(connection.selectedEnv || 'prod');
+  const [selectedEngine, setSelectedEngine] = useState<string>(connection.engine || 'asis');
+  const [availableEngines, setAvailableEngines] = useState<string[]>(['asis', 'secret', 'secrets']);
   const [selectedApp, setSelectedApp] = useState<string>(connection.appName || 'afc-saas-api');
   const [availableApps, setAvailableApps] = useState<string[]>(['afc-saas-api', 'afc-saas']);
   const [allKnownCities, setAllKnownCities] = useState<string[]>([
@@ -81,6 +86,16 @@ export const BulkKeyManager: React.FC<BulkKeyManagerProps> = ({
   const [newCityInput, setNewCityInput] = useState('');
   const [isScouting, setIsScouting] = useState(false);
 
+  // Active connection memo with dynamic engine and environment
+  const activeConnection = useMemo<VaultConnection>(() => {
+    return {
+      ...connection,
+      engine: selectedEngine,
+      selectedEnv,
+      appName: selectedApp,
+    };
+  }, [connection, selectedEngine, selectedEnv, selectedApp]);
+
   // Loaded Secret Data per City
   const [citySecrets, setCitySecrets] = useState<CitySecretRef[]>([]);
   const [isLoadingSecrets, setIsLoadingSecrets] = useState(false);
@@ -98,6 +113,15 @@ export const BulkKeyManager: React.FC<BulkKeyManagerProps> = ({
   const [isExecutingAction, setIsExecutingAction] = useState(false);
   const [actionProgress, setActionProgress] = useState<{ current: number; total: number; currentCity: string } | null>(null);
   const [actionSuccessMessage, setActionSuccessMessage] = useState<string | null>(null);
+
+  // Fetch available engines on mount
+  useEffect(() => {
+    VaultApiService.getEngines(activeConnection).then((res) => {
+      if (res.engines && res.engines.length > 0) {
+        setAvailableEngines((prev) => Array.from(new Set([...prev, ...res.engines])));
+      }
+    });
+  }, [connection.url, connection.token]);
 
   // Modal 1: EKLEME YAP state
   const [addInputMode, setAddInputMode] = useState<'table' | 'json'>('table');
@@ -122,23 +146,27 @@ export const BulkKeyManager: React.FC<BulkKeyManagerProps> = ({
   const [renameNewKey, setRenameNewKey] = useState<string>('');
   const [updateTargetCities, setUpdateTargetCities] = useState<string[]>([]);
 
-  // Scout existing apps & cities from Vault
+  // Scout existing apps & cities from Vault across all environments
   const handleScoutVault = useCallback(async () => {
     setIsScouting(true);
     try {
-      const res = await VaultApiService.discoverAppsAndCities(connection, selectedEnv);
-      if (res.apps.length > 0) {
+      const res = await VaultApiService.discoverAppsAndCities(activeConnection, selectedEnv);
+      if (res.apps && res.apps.length > 0) {
         setAvailableApps((prev) => Array.from(new Set([...prev, ...res.apps])));
-        if (!res.apps.includes(selectedApp) && res.apps[0]) {
+        if (!res.apps.includes(selectedApp) && !availableApps.includes(selectedApp)) {
           setSelectedApp(res.apps[0]);
         }
       }
-      if (res.cities.length > 0) {
+      if (res.cities && res.cities.length > 0) {
         setAllKnownCities((prev) => Array.from(new Set([...prev, ...res.cities])));
+      }
+      if (res.detectedEngine && res.detectedEngine !== selectedEngine) {
+        setSelectedEngine(res.detectedEngine);
+        onUpdateConnection?.({ engine: res.detectedEngine });
       }
       onAddLog(
         'info',
-        `Vault keşfi tamamlandı (${selectedEnv} ortamı)`,
+        `Vault keşfi tamamlandı (${selectedEnv} ortamı, Engine: ${res.detectedEngine || selectedEngine})`,
         `${res.cities.length} şehir ve ${res.apps.length} uygulama bulundu.`
       );
     } catch (err: any) {
@@ -146,11 +174,11 @@ export const BulkKeyManager: React.FC<BulkKeyManagerProps> = ({
     } finally {
       setIsScouting(false);
     }
-  }, [connection, selectedEnv, selectedApp, onAddLog]);
+  }, [activeConnection, selectedEnv, selectedApp, availableApps, selectedEngine, onAddLog, onUpdateConnection]);
 
   useEffect(() => {
     handleScoutVault();
-  }, [selectedEnv]);
+  }, [selectedEnv, selectedEngine]);
 
   // Load Secrets for Selected Cities and Application
   const handleLoadCitySecrets = useCallback(async () => {
@@ -167,7 +195,7 @@ export const BulkKeyManager: React.FC<BulkKeyManagerProps> = ({
       setFetchProgress({ current: i + 1, total: selectedCities.length });
 
       try {
-        const res = await VaultApiService.readSecret(connection, path);
+        const res = await VaultApiService.readSecret(activeConnection, path);
         if (res.success && res.secret) {
           results.push({
             city,
@@ -175,6 +203,13 @@ export const BulkKeyManager: React.FC<BulkKeyManagerProps> = ({
             status: 'success',
             secretData: res.secret,
             version: res.secret.currentVersion,
+          });
+        } else if (res.notFound) {
+          results.push({
+            city,
+            path,
+            status: 'not_found',
+            error: 'Bu ortamda henüz secret mevcut değil',
           });
         } else {
           results.push({
@@ -203,14 +238,14 @@ export const BulkKeyManager: React.FC<BulkKeyManagerProps> = ({
     onAddLog(
       'info',
       `Şehir secret'ları yüklendi (${loadedCount}/${selectedCities.length})`,
-      `Uygulama: ${selectedApp}, Ortam: ${selectedEnv}`
+      `Uygulama: ${selectedApp}, Ortam: ${selectedEnv}, Engine: ${selectedEngine}`
     );
-  }, [selectedCities, selectedEnv, selectedApp, connection, onAddLog]);
+  }, [selectedCities, selectedEnv, selectedApp, selectedEngine, activeConnection, onAddLog]);
 
-  // Auto load on initial or when app/env/cities change
+  // Auto load on initial or when app/env/engine changes
   useEffect(() => {
     handleLoadCitySecrets();
-  }, [selectedEnv, selectedApp]);
+  }, [selectedEnv, selectedApp, selectedEngine]);
 
   // Aggregate keys across loaded city secrets
   const aggregatedKeys: AggregatedKeyRow[] = useMemo(() => {
@@ -357,11 +392,11 @@ export const BulkKeyManager: React.FC<BulkKeyManagerProps> = ({
       setActionProgress({ current: i + 1, total: addSelectedCities.length, currentCity: city });
 
       try {
-        const readRes = await VaultApiService.readSecret(connection, path);
+        const readRes = await VaultApiService.readSecret(activeConnection, path);
         const currentData = (readRes.success && readRes.secret?.data) ? readRes.secret.data : { appsettings: {} };
         const updatedData = applyAddKeysToSecretData(currentData, itemsToAdd, ':');
 
-        const writeRes = await VaultApiService.writeSecret(connection, path, updatedData);
+        const writeRes = await VaultApiService.writeSecret(activeConnection, path, updatedData);
         if (writeRes.success) {
           updatedCount++;
         } else {
@@ -425,10 +460,10 @@ export const BulkKeyManager: React.FC<BulkKeyManagerProps> = ({
       setActionProgress({ current: i + 1, total: deleteTargetCities.length, currentCity: city });
 
       try {
-        const readRes = await VaultApiService.readSecret(connection, path);
+        const readRes = await VaultApiService.readSecret(activeConnection, path);
         if (readRes.success && readRes.secret?.data) {
           const updatedData = applyDeleteKeysToSecretData(readRes.secret.data, deleteSelectedKeys, ':');
-          const writeRes = await VaultApiService.writeSecret(connection, path, updatedData);
+          const writeRes = await VaultApiService.writeSecret(activeConnection, path, updatedData);
           if (writeRes.success) {
             updatedCount++;
           } else {
@@ -495,7 +530,7 @@ export const BulkKeyManager: React.FC<BulkKeyManagerProps> = ({
       setActionProgress({ current: i + 1, total: updateTargetCities.length, currentCity: city });
 
       try {
-        const readRes = await VaultApiService.readSecret(connection, path);
+        const readRes = await VaultApiService.readSecret(activeConnection, path);
         if (readRes.success && readRes.secret?.data) {
           let updatedData = readRes.secret.data;
 
@@ -520,7 +555,7 @@ export const BulkKeyManager: React.FC<BulkKeyManagerProps> = ({
             );
           }
 
-          const writeRes = await VaultApiService.writeSecret(connection, path, updatedData);
+          const writeRes = await VaultApiService.writeSecret(activeConnection, path, updatedData);
           if (writeRes.success) {
             updatedCount++;
           } else {
@@ -593,7 +628,7 @@ export const BulkKeyManager: React.FC<BulkKeyManagerProps> = ({
           </div>
 
           {/* Configuration Selection Row */}
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-3 bg-slate-950/60 p-3 rounded-lg border border-slate-800/80">
+          <div className="grid grid-cols-1 md:grid-cols-4 gap-3 bg-slate-950/60 p-3 rounded-lg border border-slate-800/80">
             {/* 1. Environment Selection */}
             <div>
               <label className="text-[11px] font-semibold uppercase tracking-wider text-slate-400 mb-1 flex items-center gap-1">
@@ -617,29 +652,78 @@ export const BulkKeyManager: React.FC<BulkKeyManagerProps> = ({
               </div>
             </div>
 
-            {/* 2. Application Selection */}
+            {/* 2. Secret Engine Selection */}
+            <div>
+              <div className="flex items-center justify-between mb-1">
+                <label className="text-[11px] font-semibold uppercase tracking-wider text-slate-400 flex items-center gap-1">
+                  <Database className="w-3.5 h-3.5 text-emerald-400" />
+                  <span>Secret Engine</span>
+                </label>
+                <span className="text-[10px] text-emerald-400/80 font-mono">
+                  {selectedEngine}/
+                </span>
+              </div>
+              <div className="flex gap-1.5">
+                <select
+                  value={selectedEngine}
+                  onChange={(e) => {
+                    const eng = e.target.value;
+                    setSelectedEngine(eng);
+                    onUpdateConnection?.({ engine: eng });
+                  }}
+                  className="flex-1 bg-slate-900 border border-slate-800 rounded-md px-2.5 py-1.5 text-xs text-slate-200 focus:outline-none focus:border-cyan-500 font-mono"
+                >
+                  {availableEngines.map((eng) => (
+                    <option key={eng} value={eng}>
+                      {eng} (KV)
+                    </option>
+                  ))}
+                </select>
+                <div className="flex gap-1">
+                  {['secret', 'asis'].map((eng) => (
+                    <button
+                      key={eng}
+                      onClick={() => {
+                        setSelectedEngine(eng);
+                        onUpdateConnection?.({ engine: eng });
+                      }}
+                      className={`px-2 py-1 text-[10px] font-mono rounded border transition-colors ${
+                        selectedEngine === eng
+                          ? 'bg-emerald-950/80 border-emerald-500 text-emerald-300 font-semibold'
+                          : 'bg-slate-900 border-slate-800 text-slate-400 hover:text-slate-200'
+                      }`}
+                      title={`${eng} engine'ine geç`}
+                    >
+                      {eng}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            </div>
+
+            {/* 3. Application Selection */}
             <div>
               <div className="flex items-center justify-between mb-1">
                 <label className="text-[11px] font-semibold uppercase tracking-wider text-slate-400 flex items-center gap-1">
                   <Layers className="w-3.5 h-3.5 text-indigo-400" />
-                  <span>Uygulama (Application)</span>
+                  <span>Uygulama ({availableApps.length})</span>
                 </label>
                 <button
                   onClick={handleScoutVault}
                   disabled={isScouting}
                   className="text-[10px] text-cyan-400 hover:underline flex items-center gap-1"
-                  title="Vault'u tara ve mevcut uygulamaları bul"
+                  title="Tüm Vault ortamlarını (prod, test, dev) tara ve tüm uygulamaları çek"
                 >
                   <Search className={`w-2.5 h-2.5 ${isScouting ? 'animate-spin' : ''}`} />
-                  <span>{isScouting ? 'Taranıyor...' : 'Vault Taraması Yap'}</span>
+                  <span>{isScouting ? 'Taranıyor...' : 'Tüm Vault\'u Tara'}</span>
                 </button>
               </div>
 
-              <div className="flex gap-2">
+              <div className="flex gap-1.5">
                 <select
                   value={selectedApp}
                   onChange={(e) => setSelectedApp(e.target.value)}
-                  className="flex-1 bg-slate-900 border border-slate-800 rounded-md px-3 py-1.5 text-xs text-slate-200 focus:outline-none focus:border-cyan-500 font-mono"
+                  className="flex-1 bg-slate-900 border border-slate-800 rounded-md px-2.5 py-1.5 text-xs text-slate-200 focus:outline-none focus:border-cyan-500 font-mono"
                 >
                   {availableApps.map((app) => (
                     <option key={app} value={app}>
@@ -650,7 +734,7 @@ export const BulkKeyManager: React.FC<BulkKeyManagerProps> = ({
 
                 <input
                   type="text"
-                  placeholder="veya özel uygulama adı"
+                  placeholder="özel uygulama adı"
                   onKeyDown={(e) => {
                     if (e.key === 'Enter' && e.currentTarget.value.trim()) {
                       const custom = e.currentTarget.value.trim();
@@ -661,18 +745,19 @@ export const BulkKeyManager: React.FC<BulkKeyManagerProps> = ({
                       e.currentTarget.value = '';
                     }
                   }}
-                  className="w-36 bg-slate-900 border border-slate-800 rounded-md px-2.5 py-1.5 text-xs text-slate-200 placeholder:text-slate-600 focus:outline-none focus:border-cyan-500"
+                  className="w-28 bg-slate-900 border border-slate-800 rounded-md px-2 py-1.5 text-xs text-slate-200 placeholder:text-slate-600 focus:outline-none focus:border-cyan-500"
+                  title="Listede olmayan başka bir uygulama adı ekleyip Enter'a basın"
                 />
               </div>
             </div>
 
-            {/* 3. Path Pattern Info */}
+            {/* 4. Path Pattern Info */}
             <div className="flex flex-col justify-center">
               <span className="text-[11px] font-semibold uppercase tracking-wider text-slate-400 mb-1">
                 Hedef Vault Yolu Şablonu:
               </span>
-              <div className="bg-slate-900/80 px-2.5 py-1.5 rounded border border-slate-800 font-mono text-[11px] text-cyan-300 truncate">
-                {selectedEnv}/apps-&#123;sehir&#125;/{selectedApp}/&#123;sehir&#125;
+              <div className="bg-slate-900/80 px-2.5 py-1.5 rounded border border-slate-800 font-mono text-[11px] text-cyan-300 truncate" title={`${selectedEngine}/${selectedEnv}/apps-{sehir}/${selectedApp}/{sehir}`}>
+                {selectedEngine}/{selectedEnv}/apps-&#123;sehir&#125;/{selectedApp}/&#123;sehir&#125;
               </div>
             </div>
           </div>

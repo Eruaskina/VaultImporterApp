@@ -126,7 +126,7 @@ export class VaultApiService {
     conn: VaultConnection,
     path: string,
     version?: number
-  ): Promise<{ success: boolean; secret?: SecretData; error?: string }> {
+  ): Promise<{ success: boolean; notFound?: boolean; secret?: SecretData; error?: string }> {
     if (conn.isDemoMode) {
       try {
         const result = MockVaultService.readSecret(conn.engine, path, version);
@@ -142,7 +142,7 @@ export class VaultApiService {
           },
         };
       } catch (err: any) {
-        return { success: false, error: err.message };
+        return { success: false, notFound: true, error: err.message };
       }
     }
 
@@ -174,7 +174,11 @@ export class VaultApiService {
           },
         };
       }
-      return { success: false, error: data.message || 'Secret okunamadı' };
+      return {
+        success: false,
+        notFound: Boolean(data.notFound || res.status === 404),
+        error: data.message || 'Secret okunamadı',
+      };
     } catch (err: any) {
       return { success: false, error: err.message };
     }
@@ -289,79 +293,129 @@ export class VaultApiService {
   }
 
   /**
-   * Discovers existing apps and cities from Vault or Mock store.
+   * Discovers all existing apps and cities from Vault or Mock store.
+   * Scans across environments (prod, test, dev) and engines to find every application.
    */
   static async discoverAppsAndCities(
     conn: VaultConnection,
     env: VaultEnvironment
-  ): Promise<{ apps: string[]; cities: string[] }> {
+  ): Promise<{ apps: string[]; cities: string[]; detectedEngine?: string }> {
     const defaultCities = ['istanbul', 'ankara', 'izmir', 'tekirdag', 'bursa'];
     const defaultApps = ['afc-saas-api', 'afc-saas'];
 
     if (conn.isDemoMode) {
-      const allPaths = MockVaultService.getAllSecretPaths(conn.engine);
+      const engines = MockVaultService.getEngines();
       const citiesSet = new Set<string>();
       const appsSet = new Set<string>();
 
-      for (const p of allPaths) {
-        // e.g. prod/apps-istanbul/afc-saas-api/istanbul
-        const regex = new RegExp(`^${env}/apps-([^/]+)/([^/]+)/?`);
-        const match = p.match(regex);
-        if (match) {
-          citiesSet.add(match[1].toLowerCase());
-          appsSet.add(match[2]);
+      for (const eng of engines) {
+        const allPaths = MockVaultService.getAllSecretPaths(eng);
+        for (const p of allPaths) {
+          // Check standard patterns: {env}/apps-{city}/{app}/{city}
+          const regex1 = /(?:^|\/)(?:prod|test|dev)\/apps-([^/]+)\/([^/]+)/i;
+          const match1 = p.match(regex1);
+          if (match1) {
+            citiesSet.add(match1[1].toLowerCase());
+            appsSet.add(match1[2]);
+          }
+
+          // Check direct pattern: apps-{city}/{app}
+          const regex2 = /(?:^|\/)apps-([^/]+)\/([^/]+)/i;
+          const match2 = p.match(regex2);
+          if (match2) {
+            citiesSet.add(match2[1].toLowerCase());
+            appsSet.add(match2[2]);
+          }
         }
       }
 
-      // Merge with defaults
       defaultCities.forEach((c) => citiesSet.add(c));
       defaultApps.forEach((a) => appsSet.add(a));
 
       return {
         cities: Array.from(citiesSet).sort(),
         apps: Array.from(appsSet).sort(),
+        detectedEngine: conn.engine,
       };
     }
 
+    // 1. Live Vault: First try fast server-side discovery endpoint
     try {
-      // Live Vault search under {env}/
-      const rootRes = await this.listPath(conn, `${env}`);
+      const res = await fetch('/api/vault/discover', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          url: conn.url,
+          token: conn.token,
+          engine: conn.engine,
+          namespace: conn.namespace,
+        }),
+      });
+
+      if (res.ok) {
+        const data = await res.json();
+        if (data.success && (data.apps?.length > 0 || data.cities?.length > 0)) {
+          return {
+            apps: data.apps || defaultApps,
+            cities: data.cities || defaultCities,
+            detectedEngine: data.engine || conn.engine,
+          };
+        }
+      }
+    } catch {
+      // Fallback to client-side list queries below
+    }
+
+    // 2. Client-side fallback discovery across all environments
+    try {
       const citiesSet = new Set<string>();
       const appsSet = new Set<string>();
+      const envsToScan: VaultEnvironment[] = [env, 'prod', 'test', 'dev'];
+      const uniqueEnvs = Array.from(new Set(envsToScan));
 
-      if (rootRes.success && rootRes.keys) {
-        for (const k of rootRes.keys) {
-          if (k.startsWith('apps-')) {
-            const cityName = k.replace(/^apps-/, '').replace(/\/$/, '').toLowerCase();
-            if (cityName) citiesSet.add(cityName);
+      for (const targetEnv of uniqueEnvs) {
+        const rootRes = await this.listPath(conn, targetEnv);
+        if (rootRes.success && rootRes.keys) {
+          for (const k of rootRes.keys) {
+            const cleanKey = k.replace(/\/$/, '');
+            if (cleanKey.startsWith('apps-')) {
+              const cityName = cleanKey.replace(/^apps-/, '').toLowerCase();
+              if (cityName) citiesSet.add(cityName);
+
+              // Probe this city for applications
+              const cityRes = await this.listPath(conn, `${targetEnv}/${cleanKey}`);
+              if (cityRes.success && cityRes.keys) {
+                for (const ak of cityRes.keys) {
+                  const appName = ak.replace(/\/$/, '');
+                  if (appName && appName !== cityName) {
+                    appsSet.add(appName);
+                  }
+                }
+              }
+            } else if (cleanKey && !cleanKey.includes('.')) {
+              // Potential direct application folder
+              const subRes = await this.listPath(conn, `${targetEnv}/${cleanKey}`);
+              if (subRes.success && subRes.keys && subRes.keys.length > 0) {
+                appsSet.add(cleanKey);
+              }
+            }
           }
         }
       }
 
-      // Check first 1-2 cities to discover app names
-      const candidateCities = Array.from(citiesSet).slice(0, 3);
-      for (const c of candidateCities) {
-        const appRes = await this.listPath(conn, `${env}/apps-${c}`);
-        if (appRes.success && appRes.keys) {
-          for (const ak of appRes.keys) {
-            const appName = ak.replace(/\/$/, '');
-            if (appName) appsSet.add(appName);
-          }
-        }
-      }
-
-      // Fallback if sets are empty
       defaultCities.forEach((c) => citiesSet.add(c));
       defaultApps.forEach((a) => appsSet.add(a));
 
       return {
         cities: Array.from(citiesSet).sort(),
         apps: Array.from(appsSet).sort(),
+        detectedEngine: conn.engine,
       };
     } catch {
       return {
         cities: defaultCities,
         apps: defaultApps,
+        detectedEngine: conn.engine,
       };
     }
   }

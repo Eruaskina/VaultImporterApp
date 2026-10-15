@@ -154,6 +154,7 @@ export default function App() {
         {activeTab === 'bulk_keys' && (
           <BulkKeyManager
             connection={connection}
+            onUpdateConnection={updateConnection}
             onAddLog={addLog}
             onNavigateToExplorer={() => setActiveTab('explorer')}
           />

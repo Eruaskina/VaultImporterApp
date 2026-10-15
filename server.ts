@@ -200,11 +200,33 @@ app.post('/api/vault/engines', async (req: Request, res: Response) => {
   });
 });
 
+// Helper to query list keys from Vault
+async function vaultListDirect(
+  url: string,
+  engine: string,
+  path: string,
+  token: string,
+  namespace?: string
+): Promise<string[]> {
+  const cleanPath = path ? path.replace(/^\/+|\/+$/g, '') : '';
+  const v2ListUrl = cleanPath ? `${engine}/metadata/${cleanPath}?list=true` : `${engine}/metadata?list=true`;
+  const result = await callVault(url, v2ListUrl, token, 'GET', undefined, namespace);
+  if (result.ok && result.data?.data?.keys && Array.isArray(result.data.data.keys)) {
+    return result.data.data.keys;
+  }
+  const v1ListUrl = cleanPath ? `${engine}/${cleanPath}?list=true` : `${engine}?list=true`;
+  const v1Result = await callVault(url, v1ListUrl, token, 'GET', undefined, namespace);
+  if (v1Result.ok && v1Result.data?.data?.keys && Array.isArray(v1Result.data.data.keys)) {
+    return v1Result.data.data.keys;
+  }
+  return [];
+}
+
 // 3. List secrets at a path (KV v2 metadata list or KV v1 list)
 app.post('/api/vault/list', async (req: Request, res: Response) => {
   const { url, token, engine = 'asis', path = '', namespace } = req.body;
   const cleanPath = path ? path.replace(/^\/+|\/+$/g, '') : '';
-  
+
   // KV v2 uses /v1/{engine}/metadata/{path}?list=true
   const v2ListUrl = cleanPath ? `${engine}/metadata/${cleanPath}?list=true` : `${engine}/metadata?list=true`;
   const result = await callVault(url, v2ListUrl, token, 'GET', undefined, namespace);
@@ -231,7 +253,18 @@ app.post('/api/vault/list', async (req: Request, res: Response) => {
     return;
   }
 
-  res.status(result.status || 404).json({
+  // If path simply doesn't exist (404), return empty keys gracefully with 200 OK
+  if (result.status === 404 || v1Result.status === 404) {
+    res.json({
+      success: true,
+      notFound: true,
+      keys: [],
+      message: 'Dizin bulunamadı veya henüz anahtar yok.',
+    });
+    return;
+  }
+
+  res.status(result.status || 500).json({
     success: false,
     message: result.data?.errors?.[0] || result.error || 'Dizin bulunamadı veya anahtar listelenemedi.',
     keys: [],
@@ -285,9 +318,114 @@ app.post('/api/vault/read', async (req: Request, res: Response) => {
     return;
   }
 
-  res.status(result.status || 404).json({
+  // Return 200 with notFound: true instead of throwing 404 network error in browser console
+  if (result.status === 404 || v1Result.status === 404) {
+    res.json({
+      success: false,
+      notFound: true,
+      message: 'Secret bu yolda henüz mevcut değil (404 Not Found).',
+    });
+    return;
+  }
+
+  res.status(result.status || 500).json({
     success: false,
     message: result.data?.errors?.[0] || result.error || 'Secret okunamadı.',
+  });
+});
+
+// 4.5 Discover all applications and cities across all environments and candidate engines in Vault
+app.post('/api/vault/discover', async (req: Request, res: Response) => {
+  const { url, token, engine = 'asis', namespace } = req.body;
+  if (!url || !token) {
+    res.status(400).json({ success: false, message: 'URL ve Token gereklidir.' });
+    return;
+  }
+
+  const candidateEngines = Array.from(new Set([engine, 'secret', 'asis', 'secrets'].filter(Boolean)));
+  const discoveredApps = new Set<string>();
+  const discoveredCities = new Set<string>();
+  let activeEngine = engine;
+
+  for (const eng of candidateEngines) {
+    try {
+      // 1. Inspect engine root
+      const rootKeys = await vaultListDirect(url, eng, '', token, namespace);
+      const envsToCheck = new Set<string>(['prod', 'test', 'dev']);
+
+      for (const rk of rootKeys) {
+        const cleanRk = rk.replace(/\/$/, '');
+        if (['prod', 'test', 'dev'].includes(cleanRk.toLowerCase())) {
+          envsToCheck.add(cleanRk);
+        } else if (cleanRk.startsWith('apps-')) {
+          const cityName = cleanRk.replace(/^apps-/, '').toLowerCase();
+          if (cityName) {
+            discoveredCities.add(cityName);
+            const appKeys = await vaultListDirect(url, eng, cleanRk, token, namespace);
+            for (const ak of appKeys) {
+              const app = ak.replace(/\/$/, '');
+              if (app && app !== cityName) discoveredApps.add(app);
+            }
+          }
+        }
+      }
+
+      // 2. Inspect environments: prod, test, dev, etc.
+      for (const envFolder of envsToCheck) {
+        const envKeys = await vaultListDirect(url, eng, envFolder, token, namespace);
+        for (const ek of envKeys) {
+          const cleanEk = ek.replace(/\/$/, '');
+          if (cleanEk.startsWith('apps-')) {
+            const cityName = cleanEk.replace(/^apps-/, '').toLowerCase();
+            if (cityName) discoveredCities.add(cityName);
+
+            // e.g. prod/apps-tekirdag -> list to get application names!
+            const appKeys = await vaultListDirect(url, eng, `${envFolder}/${cleanEk}`, token, namespace);
+            for (const ak of appKeys) {
+              const app = ak.replace(/\/$/, '');
+              if (app && app !== cityName && !app.endsWith('.json')) {
+                discoveredApps.add(app);
+              }
+            }
+          } else if (cleanEk) {
+            // E.g. prod/afc-saas-api or prod/tekirdag
+            const subKeys = await vaultListDirect(url, eng, `${envFolder}/${cleanEk}`, token, namespace);
+            if (subKeys.length > 0) {
+              // If it contains folders, test if it's an app name
+              if (!['apps', 'user', 'users'].includes(cleanEk)) {
+                discoveredApps.add(cleanEk);
+              }
+              for (const sk of subKeys) {
+                const cleanSk = sk.replace(/\/$/, '').toLowerCase();
+                if (cleanSk.startsWith('apps-')) {
+                  discoveredCities.add(cleanSk.replace(/^apps-/, ''));
+                } else if (!cleanSk.includes('.') && cleanSk.length <= 15) {
+                  discoveredCities.add(cleanSk);
+                }
+              }
+            }
+          }
+        }
+      }
+
+      if (discoveredApps.size > 0 || discoveredCities.size > 0) {
+        activeEngine = eng;
+        break; // Found our primary active engine!
+      }
+    } catch {
+      // Try next engine
+    }
+  }
+
+  // Ensure default standards are included so UI always has choices
+  ['afc-saas-api', 'afc-saas'].forEach((a) => discoveredApps.add(a));
+  ['istanbul', 'ankara', 'izmir', 'tekirdag', 'bursa'].forEach((c) => discoveredCities.add(c));
+
+  res.json({
+    success: true,
+    engine: activeEngine,
+    apps: Array.from(discoveredApps).sort(),
+    cities: Array.from(discoveredCities).sort(),
   });
 });
 
