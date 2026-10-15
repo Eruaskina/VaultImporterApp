@@ -68,6 +68,14 @@ export interface LogEntry {
   details?: string;
 }
 
+export interface AppFileItem {
+  id: string; // unique identifier e.g. 'apps-tekirdag/tekirdag'
+  fileName: string; // e.g. 'tekirdag' or 'appsettings.json'
+  appsFolder: string; // e.g. 'apps-tekirdag'
+  path: string; // full path e.g. 'prod/apps-tekirdag/afc-saas-api/tekirdag'
+  displayName: string; // e.g. 'tekirdag (apps-tekirdag)'
+}
+
 export interface CitySecretRef {
   city: string;
   path: string;
@@ -75,6 +83,9 @@ export interface CitySecretRef {
   secretData?: SecretData;
   error?: string;
   version?: number;
+  fileName?: string;
+  appsFolder?: string;
+  fileId?: string;
 }
 
 export interface AggregatedKeyRow {
@@ -87,3 +98,4 @@ export interface AggregatedKeyRow {
 }
 
 export type BatchModalMode = 'none' | 'add' | 'delete' | 'update_value' | 'rename_key';
+

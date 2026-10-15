@@ -463,6 +463,75 @@ app.post('/api/vault/discover', async (req: Request, res: Response) => {
   });
 });
 
+// 4.6 List all files under apps-*/{appName}/ across the environment
+app.post('/api/vault/app-files', async (req: Request, res: Response) => {
+  const { url, token, engine = 'asis', env = 'prod', appName, namespace } = req.body;
+  if (!url || !token || !appName) {
+    res.status(400).json({ success: false, message: 'URL, Token ve Uygulama Adı gereklidir.' });
+    return;
+  }
+
+  try {
+    const files: Array<{
+      id: string;
+      fileName: string;
+      appsFolder: string;
+      path: string;
+      displayName: string;
+    }> = [];
+
+    // 1. List keys in env folder (e.g. 'prod')
+    const envKeys = await vaultListDirect(url, engine, env, token, namespace);
+
+    for (const ek of envKeys) {
+      const cleanEk = ek.replace(/\/$/, '');
+      if (cleanEk.startsWith('apps-')) {
+        // E.g. cleanEk = "apps-tekirdag"
+        // List inside `${env}/${cleanEk}/${appName}`
+        const appFolderKeys = await vaultListDirect(url, engine, `${env}/${cleanEk}/${appName}`, token, namespace);
+        for (const fk of appFolderKeys) {
+          const fileName = fk.replace(/\/$/, '');
+          if (fileName) {
+            files.push({
+              id: `${cleanEk}/${fileName}`,
+              fileName: fileName,
+              appsFolder: cleanEk,
+              path: `${env}/${cleanEk}/${appName}/${fileName}`,
+              displayName: `${fileName} (${cleanEk})`,
+            });
+          }
+        }
+      } else if (cleanEk === appName) {
+        // Direct pattern: ${env}/${appName}
+        const directKeys = await vaultListDirect(url, engine, `${env}/${cleanEk}`, token, namespace);
+        for (const fk of directKeys) {
+          const fileName = fk.replace(/\/$/, '');
+          if (fileName && !fileName.startsWith('apps-')) {
+            files.push({
+              id: `${cleanEk}/${fileName}`,
+              fileName: fileName,
+              appsFolder: '',
+              path: `${env}/${cleanEk}/${fileName}`,
+              displayName: fileName,
+            });
+          }
+        }
+      }
+    }
+
+    res.json({
+      success: true,
+      files,
+    });
+  } catch (err: any) {
+    res.status(500).json({
+      success: false,
+      message: err.message || 'Dosyalar listelenemedi.',
+      files: [],
+    });
+  }
+});
+
 // 5. Create / Update secret (writes new version in KV v2)
 app.post('/api/vault/write', async (req: Request, res: Response) => {
   const { url, token, engine = 'asis', path = '', data = {}, cas, namespace } = req.body;

@@ -1,4 +1,4 @@
-import { VaultConnection, SecretEngine, SecretData, BatchFileItem, VaultEnvironment } from '../types/vault';
+import { VaultConnection, SecretEngine, SecretData, BatchFileItem, VaultEnvironment, AppFileItem } from '../types/vault';
 import { MockVaultService } from './mockVaultStore';
 
 export class VaultApiService {
@@ -460,4 +460,95 @@ export class VaultApiService {
       };
     }
   }
+
+  /**
+   * Discovers and retrieves ALL actual files/secrets under apps-folders / (appName) in the specified environment.
+   * If there are files with custom names or multiple files, returns each of them.
+   */
+  static async getAppFiles(
+    conn: VaultConnection,
+    env: VaultEnvironment,
+    appName: string
+  ): Promise<AppFileItem[]> {
+    if (!appName) return [];
+
+    if (conn.isDemoMode) {
+      const allPaths = MockVaultService.getAllSecretPaths(conn.engine);
+      const files: AppFileItem[] = [];
+      const prefixRegex = new RegExp(`^${env}/(apps-[^/]+)/${appName}/([^/]+)$`, 'i');
+
+      for (const p of allPaths) {
+        const match = p.match(prefixRegex);
+        if (match) {
+          const appsFolder = match[1].toLowerCase();
+          const fileName = match[2];
+          files.push({
+            id: `${appsFolder}/${fileName}`,
+            fileName,
+            appsFolder,
+            path: p,
+            displayName: `${fileName} (${appsFolder})`,
+          });
+        }
+      }
+      return files;
+    }
+
+    // 1. Live Vault: Call backend endpoint /api/vault/app-files
+    try {
+      const res = await fetch('/api/vault/app-files', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          url: conn.url,
+          token: conn.token,
+          engine: conn.engine,
+          env,
+          appName,
+          namespace: conn.namespace,
+        }),
+      });
+
+      if (res.ok) {
+        const data = await res.json();
+        if (data.success && Array.isArray(data.files) && data.files.length > 0) {
+          return data.files;
+        }
+      }
+    } catch {
+      // Fallback below
+    }
+
+    // 2. Client-side fallback if server endpoint is unreachable
+    try {
+      const files: AppFileItem[] = [];
+      const envRes = await this.listPath(conn, env);
+      if (envRes.success && envRes.keys) {
+        for (const ek of envRes.keys) {
+          const cleanEk = ek.replace(/\/$/, '');
+          if (cleanEk.startsWith('apps-')) {
+            const appRes = await this.listPath(conn, `${env}/${cleanEk}/${appName}`);
+            if (appRes.success && appRes.keys) {
+              for (const fk of appRes.keys) {
+                const fileName = fk.replace(/\/$/, '');
+                if (fileName) {
+                  files.push({
+                    id: `${cleanEk}/${fileName}`,
+                    fileName,
+                    appsFolder: cleanEk,
+                    path: `${env}/${cleanEk}/${appName}/${fileName}`,
+                    displayName: `${fileName} (${cleanEk})`,
+                  });
+                }
+              }
+            }
+          }
+        }
+      }
+      return files;
+    } catch {
+      return [];
+    }
+  }
 }
+

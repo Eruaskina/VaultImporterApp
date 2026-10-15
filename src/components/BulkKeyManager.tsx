@@ -5,6 +5,7 @@ import {
   AggregatedKeyRow,
   CitySecretRef,
   BatchModalMode,
+  AppFileItem,
 } from '../types/vault';
 import { VaultApiService } from '../services/vaultApi';
 import {
@@ -41,6 +42,8 @@ import {
   Table as TableIcon,
   Sparkles,
   Database,
+  FileText,
+  FileCode,
 } from 'lucide-react';
 
 interface BulkKeyManagerProps {
@@ -64,16 +67,29 @@ export const BulkKeyManager: React.FC<BulkKeyManagerProps> = ({
   onUpdateConnection,
 }) => {
   // Configuration State
+  // Configuration State
   const [selectedEnv, setSelectedEnv] = useState<VaultEnvironment>(connection.selectedEnv || 'prod');
   const [selectedEngine, setSelectedEngine] = useState<string>(connection.engine || 'asis');
   const [availableEngines, setAvailableEngines] = useState<string[]>(['asis', 'secret', 'secrets']);
   const [selectedApp, setSelectedApp] = useState<string>(connection.appName || 'afc-saas-api');
   const [availableApps, setAvailableApps] = useState<string[]>(['afc-saas-api', 'afc-saas']);
   const [appCitiesMap, setAppCitiesMap] = useState<Record<string, string[]>>({});
-  const [allKnownCities, setAllKnownCities] = useState<string[]>([]);
-  const [selectedCities, setSelectedCities] = useState<string[]>([]);
-  const [newCityInput, setNewCityInput] = useState('');
+
+  // Discovered Files under apps-*/selectedApp
+  const [allAppFiles, setAllAppFiles] = useState<AppFileItem[]>([]);
+  const [selectedFileIds, setSelectedFileIds] = useState<string[]>([]);
+  const [newFileInput, setNewFileInput] = useState('');
   const [isScouting, setIsScouting] = useState(false);
+
+  // Computed Aliases
+  const allKnownCities = useMemo(() => allAppFiles.map((f) => f.id), [allAppFiles]);
+  const selectedCities = useMemo(() => selectedFileIds, [selectedFileIds]);
+  const setSelectedCities = setSelectedFileIds;
+  const setAllKnownCities = (_cities: string[]) => {};
+  const sortedAppFiles = useMemo(
+    () => [...allAppFiles].sort((a, b) => a.fileName.localeCompare(b.fileName)),
+    [allAppFiles]
+  );
 
   // Active connection memo with dynamic engine and environment
   const activeConnection = useMemo<VaultConnection>(() => {
@@ -85,7 +101,7 @@ export const BulkKeyManager: React.FC<BulkKeyManagerProps> = ({
     };
   }, [connection, selectedEngine, selectedEnv, selectedApp]);
 
-  // Loaded Secret Data per City
+  // Loaded Secret Data per File
   const [citySecrets, setCitySecrets] = useState<CitySecretRef[]>([]);
   const [isLoadingSecrets, setIsLoadingSecrets] = useState(false);
   const [fetchProgress, setFetchProgress] = useState<{ current: number; total: number } | null>(null);
@@ -120,11 +136,15 @@ export const BulkKeyManager: React.FC<BulkKeyManagerProps> = ({
   const [addJsonInput, setAddJsonInput] = useState('{\n  "YeniAyar": "Deger"\n}');
   const [addJsonError, setAddJsonError] = useState<string | null>(null);
   const [addOverwriteExisting, setAddOverwriteExisting] = useState(true);
-  const [addSelectedCities, setAddSelectedCities] = useState<string[]>([]);
+  const [addSelectedFileIds, setAddSelectedFileIds] = useState<string[]>([]);
+  const addSelectedCities = addSelectedFileIds;
+  const setAddSelectedCities = setAddSelectedFileIds;
 
   // Modal 2: SİL state
   const [deleteSelectedKeys, setDeleteSelectedKeys] = useState<string[]>([]);
-  const [deleteTargetCities, setDeleteTargetCities] = useState<string[]>([]);
+  const [deleteTargetFileIds, setDeleteTargetFileIds] = useState<string[]>([]);
+  const deleteTargetCities = deleteTargetFileIds;
+  const setDeleteTargetCities = setDeleteTargetFileIds;
 
   // Modal 3: GÜNCELLE state
   const [updateTab, setUpdateTab] = useState<'value' | 'rename'>('value');
@@ -133,9 +153,37 @@ export const BulkKeyManager: React.FC<BulkKeyManagerProps> = ({
   const [updateNewType, setUpdateNewType] = useState<'string' | 'number' | 'boolean' | 'null'>('string');
   const [renameOldKey, setRenameOldKey] = useState<string>('');
   const [renameNewKey, setRenameNewKey] = useState<string>('');
-  const [updateTargetCities, setUpdateTargetCities] = useState<string[]>([]);
+  const [updateTargetFileIds, setUpdateTargetFileIds] = useState<string[]>([]);
+  const updateTargetCities = updateTargetFileIds;
+  const setUpdateTargetCities = setUpdateTargetFileIds;
 
-  // Scout existing apps & cities from Vault across all environments
+  // Discover and list ALL actual files under apps-*/{appName}
+  const loadAppFiles = useCallback(
+    async (app: string, env: VaultEnvironment) => {
+      if (!app) return;
+      setIsLoadingSecrets(true);
+      try {
+        const files = await VaultApiService.getAppFiles(activeConnection, env, app);
+        setAllAppFiles(files);
+        const fileIds = files.map((f) => f.id);
+        setSelectedFileIds(fileIds);
+        onAddLog(
+          'info',
+          `"${app}" altındaki dosyalar listelendi (${env} ortamı)`,
+          files.length > 0
+            ? `${files.length} dosya bulundu: ${files.map((f) => f.fileName).join(', ')}`
+            : 'Bu uygulama için henüz dosya bulunamadı.'
+        );
+      } catch (err: any) {
+        onAddLog('warning', 'Dosyalar listelenirken hata', err.message);
+      } finally {
+        setIsLoadingSecrets(false);
+      }
+    },
+    [activeConnection, onAddLog]
+  );
+
+  // Scout existing apps from Vault across all environments
   const handleScoutVault = useCallback(async () => {
     setIsScouting(true);
     try {
@@ -152,80 +200,89 @@ export const BulkKeyManager: React.FC<BulkKeyManagerProps> = ({
         }
       }
 
-      // Strictly show ONLY the cities where targetApp actually exists!
-      const targetCities = currentMap[targetApp] || [];
-      setAllKnownCities(targetCities);
-      setSelectedCities(targetCities);
-
       if (res.detectedEngine && res.detectedEngine !== selectedEngine) {
         setSelectedEngine(res.detectedEngine);
         onUpdateConnection?.({ engine: res.detectedEngine });
       }
-      onAddLog(
-        'info',
-        `Vault keşfi tamamlandı (${selectedEnv} ortamı, Engine: ${res.detectedEngine || selectedEngine})`,
-        `${res.apps.length} uygulama bulundu. "${targetApp}" için ${targetCities.length} apps-şehir klasörü listelendi.`
-      );
+
+      await loadAppFiles(targetApp, selectedEnv);
     } catch (err: any) {
       onAddLog('warning', 'Vault keşfi sırasında uyarı', err.message);
     } finally {
       setIsScouting(false);
     }
-  }, [activeConnection, selectedEnv, selectedApp, selectedEngine, onAddLog, onUpdateConnection]);
+  }, [activeConnection, selectedEnv, selectedApp, selectedEngine, loadAppFiles, onAddLog, onUpdateConnection]);
 
   useEffect(() => {
     handleScoutVault();
   }, [selectedEnv, selectedEngine]);
 
-  // Load Secrets for Selected Cities and Application
-  const handleLoadCitySecrets = useCallback(async () => {
-    if (selectedCities.length === 0 || !selectedApp) {
+  useEffect(() => {
+    if (selectedApp) {
+      loadAppFiles(selectedApp, selectedEnv);
+    }
+  }, [selectedApp, selectedEnv, selectedEngine, loadAppFiles]);
+
+  // Load Secrets for Selected Files
+  const handleLoadSecrets = useCallback(async () => {
+    const filesToLoad = allAppFiles.filter((f) => selectedFileIds.includes(f.id));
+    if (filesToLoad.length === 0 || !selectedApp) {
       setCitySecrets([]);
       setIsLoadingSecrets(false);
       return;
     }
 
     setIsLoadingSecrets(true);
-    setFetchProgress({ current: 0, total: selectedCities.length });
+    setFetchProgress({ current: 0, total: filesToLoad.length });
     const results: CitySecretRef[] = [];
 
-    for (let i = 0; i < selectedCities.length; i++) {
-      const city = selectedCities[i];
-      const path = VaultApiService.getCitySecretPath(selectedEnv, city, selectedApp);
-
-      setFetchProgress({ current: i + 1, total: selectedCities.length });
+    for (let i = 0; i < filesToLoad.length; i++) {
+      const file = filesToLoad[i];
+      setFetchProgress({ current: i + 1, total: filesToLoad.length });
 
       try {
-        const res = await VaultApiService.readSecret(activeConnection, path);
+        const res = await VaultApiService.readSecret(activeConnection, file.path);
         if (res.success && res.secret) {
           results.push({
-            city,
-            path,
+            city: file.displayName,
+            path: file.path,
             status: 'success',
             secretData: res.secret,
             version: res.secret.currentVersion,
+            fileName: file.fileName,
+            appsFolder: file.appsFolder,
+            fileId: file.id,
           });
         } else if (res.notFound) {
           results.push({
-            city,
-            path,
+            city: file.displayName,
+            path: file.path,
             status: 'not_found',
-            error: 'Bu apps-şehir klasöründe henüz secret mevcut değil',
+            error: 'Secret henüz mevcut değil',
+            fileName: file.fileName,
+            appsFolder: file.appsFolder,
+            fileId: file.id,
           });
         } else {
           results.push({
-            city,
-            path,
+            city: file.displayName,
+            path: file.path,
             status: 'not_found',
             error: res.error || 'Secret henüz mevcut değil',
+            fileName: file.fileName,
+            appsFolder: file.appsFolder,
+            fileId: file.id,
           });
         }
       } catch (err: any) {
         results.push({
-          city,
-          path,
+          city: file.displayName,
+          path: file.path,
           status: 'error',
           error: err.message,
+          fileName: file.fileName,
+          appsFolder: file.appsFolder,
+          fileId: file.id,
         });
       }
     }
@@ -238,19 +295,19 @@ export const BulkKeyManager: React.FC<BulkKeyManagerProps> = ({
     const loadedCount = results.filter((r) => r.status === 'success').length;
     onAddLog(
       'info',
-      `Şehir secret'ları yüklendi (${loadedCount}/${selectedCities.length})`,
+      `Dosya secret'ları yüklendi (${loadedCount}/${filesToLoad.length})`,
       `Uygulama: ${selectedApp}, Ortam: ${selectedEnv}, Engine: ${selectedEngine}`
     );
-  }, [selectedCities, selectedEnv, selectedApp, selectedEngine, activeConnection, onAddLog]);
+  }, [allAppFiles, selectedFileIds, selectedApp, selectedEnv, selectedEngine, activeConnection, onAddLog]);
 
-  // Auto load on initial or when app/env/engine or selected cities change
+  // Auto load when selected files change
   useEffect(() => {
-    if (selectedCities.length > 0 && selectedApp) {
-      handleLoadCitySecrets();
+    if (selectedFileIds.length > 0) {
+      handleLoadSecrets();
     } else {
       setCitySecrets([]);
     }
-  }, [selectedCities, selectedApp, selectedEnv, selectedEngine]);
+  }, [selectedFileIds, allAppFiles, handleLoadSecrets]);
 
   // Aggregate keys across loaded city secrets
   const aggregatedKeys: AggregatedKeyRow[] = useMemo(() => {
@@ -303,50 +360,61 @@ export const BulkKeyManager: React.FC<BulkKeyManagerProps> = ({
     );
   };
 
-  const handleSelectAllCities = () => {
-    if (selectedCities.length === allKnownCities.length) {
-      setSelectedCities([]);
+  const handleSelectAllFiles = () => {
+    if (selectedFileIds.length === allAppFiles.length) {
+      setSelectedFileIds([]);
     } else {
-      setSelectedCities([...allKnownCities]);
+      setSelectedFileIds(allAppFiles.map((f) => f.id));
     }
   };
 
-  const handleToggleCity = (city: string) => {
-    setSelectedCities((prev) =>
-      prev.includes(city) ? prev.filter((c) => c !== city) : [...prev, city]
+  const handleToggleFile = (fileId: string) => {
+    setSelectedFileIds((prev) =>
+      prev.includes(fileId) ? prev.filter((id) => id !== fileId) : [...prev, fileId]
     );
   };
 
-  const handleAddNewCity = () => {
-    if (!newCityInput.trim() || !selectedApp) return;
-    let clean = newCityInput.trim().toLowerCase();
-    if (!clean.startsWith('apps-')) {
-      clean = `apps-${clean}`;
+  // Backward-compatible city selection helpers
+  const handleSelectAllCities = handleSelectAllFiles;
+  const handleToggleCity = handleToggleFile;
+
+  const handleAddNewFile = () => {
+    if (!newFileInput.trim() || !selectedApp) return;
+    const input = newFileInput.trim();
+    let appsFolder = '';
+    let fileName = '';
+    if (input.includes('/')) {
+      const parts = input.split('/');
+      appsFolder = parts[0].startsWith('apps-') ? parts[0] : `apps-${parts[0]}`;
+      fileName = parts.slice(1).join('/');
+    } else if (input.startsWith('apps-')) {
+      appsFolder = input;
+      fileName = input.replace(/^apps-/, '');
+    } else {
+      appsFolder = `apps-${input}`;
+      fileName = input;
     }
-    setAppCitiesMap((prev) => {
-      const existing = prev[selectedApp] || [];
-      if (!existing.includes(clean)) {
-        return {
-          ...prev,
-          [selectedApp]: [...existing, clean],
-        };
-      }
-      return prev;
-    });
-    if (!allKnownCities.includes(clean)) {
-      setAllKnownCities((prev) => [...prev, clean]);
-    }
-    if (!selectedCities.includes(clean)) {
-      setSelectedCities((prev) => [...prev, clean]);
-    }
-    setNewCityInput('');
+    const id = `${appsFolder}/${fileName}`;
+    const path = `${selectedEnv}/${appsFolder}/${selectedApp}/${fileName}`;
+    const newFile: AppFileItem = {
+      id,
+      fileName,
+      appsFolder,
+      path,
+      displayName: `${fileName} (${appsFolder})`,
+    };
+    setAllAppFiles((prev) => (prev.some((f) => f.id === id) ? prev : [...prev, newFile]));
+    setSelectedFileIds((prev) => (prev.includes(id) ? prev : [...prev, id]));
+    setNewFileInput('');
   };
 
+  const handleAddNewCity = handleAddNewFile;
+
   // --------------------------------------------------------------------------
-  // ACTION 1: EKLEME YAP (Add Key-Values)
+  // ACTION 1: EKLEME YAP (Add Key-Values to Selected Files)
   // --------------------------------------------------------------------------
   const openAddModal = () => {
-    setAddSelectedCities([...selectedCities]);
+    setAddSelectedFileIds(selectedFileIds.length > 0 ? [...selectedFileIds] : allAppFiles.map((f) => f.id));
     setAddRows([{ id: Math.random().toString(36).substring(2, 7), key: '', value: '', type: 'string' }]);
     setAddJsonInput('{\n  "Logging:LogLevel:Default": "Information"\n}');
     setAddJsonError(null);
@@ -365,8 +433,9 @@ export const BulkKeyManager: React.FC<BulkKeyManagerProps> = ({
   };
 
   const handleExecuteAdd = async () => {
-    if (addSelectedCities.length === 0) {
-      alert('Lütfen en az bir şehir seçin.');
+    const targetFiles = allAppFiles.filter((f) => addSelectedFileIds.includes(f.id));
+    if (targetFiles.length === 0) {
+      alert('Lütfen en az bir hedef dosya seçin.');
       return;
     }
 
@@ -399,29 +468,28 @@ export const BulkKeyManager: React.FC<BulkKeyManagerProps> = ({
     }
 
     setIsExecutingAction(true);
-    setActionProgress({ current: 0, total: addSelectedCities.length, currentCity: '' });
+    setActionProgress({ current: 0, total: targetFiles.length, currentCity: '' });
 
     let updatedCount = 0;
     const errors: string[] = [];
 
-    for (let i = 0; i < addSelectedCities.length; i++) {
-      const city = addSelectedCities[i];
-      const path = VaultApiService.getCitySecretPath(selectedEnv, city, selectedApp);
-      setActionProgress({ current: i + 1, total: addSelectedCities.length, currentCity: city });
+    for (let i = 0; i < targetFiles.length; i++) {
+      const file = targetFiles[i];
+      setActionProgress({ current: i + 1, total: targetFiles.length, currentCity: file.fileName });
 
       try {
-        const readRes = await VaultApiService.readSecret(activeConnection, path);
+        const readRes = await VaultApiService.readSecret(activeConnection, file.path);
         const currentData = (readRes.success && readRes.secret?.data) ? readRes.secret.data : { appsettings: {} };
         const updatedData = applyAddKeysToSecretData(currentData, itemsToAdd, ':');
 
-        const writeRes = await VaultApiService.writeSecret(activeConnection, path, updatedData);
+        const writeRes = await VaultApiService.writeSecret(activeConnection, file.path, updatedData);
         if (writeRes.success) {
           updatedCount++;
         } else {
-          errors.push(`${city}: ${writeRes.message}`);
+          errors.push(`${file.fileName}: ${writeRes.message}`);
         }
       } catch (err: any) {
-        errors.push(`${city}: ${err.message}`);
+        errors.push(`${file.fileName}: ${err.message}`);
       }
     }
 
@@ -430,18 +498,18 @@ export const BulkKeyManager: React.FC<BulkKeyManagerProps> = ({
     setModalMode('none');
 
     if (errors.length > 0) {
-      onAddLog('warning', `Toplu ekleme tamamlandı (${updatedCount}/${addSelectedCities.length})`, errors.join(', '));
+      onAddLog('warning', `Toplu ekleme tamamlandı (${updatedCount}/${targetFiles.length})`, errors.join(', '));
     } else {
-      onAddLog('success', `Toplu ekleme başarılı! (${updatedCount} şehir güncellendi)`, `${itemsToAdd.length} anahtar eklendi.`);
+      onAddLog('success', `Toplu ekleme başarılı! (${updatedCount} dosyaya yazıldı)`, `${itemsToAdd.length} anahtar eklendi.`);
     }
 
-    setActionSuccessMessage(`Tebrikler! ${updatedCount} şehirde ${itemsToAdd.length} anahtar başarıyla kaydedildi.`);
+    setActionSuccessMessage(`Tebrikler! ${updatedCount} dosyada ${itemsToAdd.length} anahtar başarıyla kaydedildi.`);
     setTimeout(() => setActionSuccessMessage(null), 5000);
-    handleLoadCitySecrets();
+    handleLoadSecrets();
   };
 
   // --------------------------------------------------------------------------
-  // ACTION 2: SİL (Bulk Delete Keys)
+  // ACTION 2: SİL (Bulk Delete Keys from Selected Files)
   // --------------------------------------------------------------------------
   const openDeleteModal = (specificKey?: string) => {
     const keysToDelete = specificKey
@@ -456,40 +524,40 @@ export const BulkKeyManager: React.FC<BulkKeyManagerProps> = ({
     }
 
     setDeleteSelectedKeys(keysToDelete);
-    setDeleteTargetCities([...selectedCities]);
+    setDeleteTargetFileIds(selectedFileIds.length > 0 ? [...selectedFileIds] : allAppFiles.map((f) => f.id));
     setModalMode('delete');
   };
 
   const handleExecuteDelete = async () => {
-    if (deleteSelectedKeys.length === 0 || deleteTargetCities.length === 0) {
-      alert('Silinecek anahtar veya hedef şehir seçilmedi.');
+    const targetFiles = allAppFiles.filter((f) => deleteTargetFileIds.includes(f.id));
+    if (deleteSelectedKeys.length === 0 || targetFiles.length === 0) {
+      alert('Silinecek anahtar veya hedef dosya seçilmedi.');
       return;
     }
 
     setIsExecutingAction(true);
-    setActionProgress({ current: 0, total: deleteTargetCities.length, currentCity: '' });
+    setActionProgress({ current: 0, total: targetFiles.length, currentCity: '' });
 
     let updatedCount = 0;
     const errors: string[] = [];
 
-    for (let i = 0; i < deleteTargetCities.length; i++) {
-      const city = deleteTargetCities[i];
-      const path = VaultApiService.getCitySecretPath(selectedEnv, city, selectedApp);
-      setActionProgress({ current: i + 1, total: deleteTargetCities.length, currentCity: city });
+    for (let i = 0; i < targetFiles.length; i++) {
+      const file = targetFiles[i];
+      setActionProgress({ current: i + 1, total: targetFiles.length, currentCity: file.fileName });
 
       try {
-        const readRes = await VaultApiService.readSecret(activeConnection, path);
+        const readRes = await VaultApiService.readSecret(activeConnection, file.path);
         if (readRes.success && readRes.secret?.data) {
           const updatedData = applyDeleteKeysToSecretData(readRes.secret.data, deleteSelectedKeys, ':');
-          const writeRes = await VaultApiService.writeSecret(activeConnection, path, updatedData);
+          const writeRes = await VaultApiService.writeSecret(activeConnection, file.path, updatedData);
           if (writeRes.success) {
             updatedCount++;
           } else {
-            errors.push(`${city}: ${writeRes.message}`);
+            errors.push(`${file.fileName}: ${writeRes.message}`);
           }
         }
       } catch (err: any) {
-        errors.push(`${city}: ${err.message}`);
+        errors.push(`${file.fileName}: ${err.message}`);
       }
     }
 
@@ -498,15 +566,15 @@ export const BulkKeyManager: React.FC<BulkKeyManagerProps> = ({
     setModalMode('none');
 
     if (errors.length > 0) {
-      onAddLog('warning', `Toplu silme uyarısı (${updatedCount}/${deleteTargetCities.length})`, errors.join(', '));
+      onAddLog('warning', `Toplu silme uyarısı (${updatedCount}/${targetFiles.length})`, errors.join(', '));
     } else {
-      onAddLog('success', `Toplu silme başarılı! (${updatedCount} şehir güncellendi)`, `${deleteSelectedKeys.join(', ')} silindi.`);
+      onAddLog('success', `Toplu silme başarılı! (${updatedCount} dosyada güncellendi)`, `${deleteSelectedKeys.join(', ')} silindi.`);
     }
 
-    setActionSuccessMessage(`${updatedCount} şehirde seçili ${deleteSelectedKeys.length} anahtar başarıyla silindi ve yeni versiyon oluşturuldu.`);
+    setActionSuccessMessage(`${updatedCount} dosyada seçili ${deleteSelectedKeys.length} anahtar başarıyla silindi ve yeni versiyon oluşturuldu.`);
     setTimeout(() => setActionSuccessMessage(null), 5000);
     setSelectedKeyPaths([]);
-    handleLoadCitySecrets();
+    handleLoadSecrets();
   };
 
   // --------------------------------------------------------------------------
@@ -525,30 +593,30 @@ export const BulkKeyManager: React.FC<BulkKeyManagerProps> = ({
     setRenameNewKey(target);
     setUpdateNewValue(row ? String(row.uniqueValues[0] ?? '') : '');
     setUpdateNewType(row ? row.type : 'string');
-    setUpdateTargetCities([...selectedCities]);
+    setUpdateTargetFileIds(selectedFileIds.length > 0 ? [...selectedFileIds] : allAppFiles.map((f) => f.id));
     setUpdateTab('value');
     setModalMode('update_value');
   };
 
   const handleExecuteUpdate = async () => {
-    if (updateTargetCities.length === 0) {
-      alert('Lütfen en az bir şehir seçin.');
+    const targetFiles = allAppFiles.filter((f) => updateTargetFileIds.includes(f.id));
+    if (targetFiles.length === 0) {
+      alert('Lütfen en az bir hedef dosya seçin.');
       return;
     }
 
     setIsExecutingAction(true);
-    setActionProgress({ current: 0, total: updateTargetCities.length, currentCity: '' });
+    setActionProgress({ current: 0, total: targetFiles.length, currentCity: '' });
 
     let updatedCount = 0;
     const errors: string[] = [];
 
-    for (let i = 0; i < updateTargetCities.length; i++) {
-      const city = updateTargetCities[i];
-      const path = VaultApiService.getCitySecretPath(selectedEnv, city, selectedApp);
-      setActionProgress({ current: i + 1, total: updateTargetCities.length, currentCity: city });
+    for (let i = 0; i < targetFiles.length; i++) {
+      const file = targetFiles[i];
+      setActionProgress({ current: i + 1, total: targetFiles.length, currentCity: file.fileName });
 
       try {
-        const readRes = await VaultApiService.readSecret(activeConnection, path);
+        const readRes = await VaultApiService.readSecret(activeConnection, file.path);
         if (readRes.success && readRes.secret?.data) {
           let updatedData = readRes.secret.data;
 
@@ -573,15 +641,15 @@ export const BulkKeyManager: React.FC<BulkKeyManagerProps> = ({
             );
           }
 
-          const writeRes = await VaultApiService.writeSecret(activeConnection, path, updatedData);
+          const writeRes = await VaultApiService.writeSecret(activeConnection, file.path, updatedData);
           if (writeRes.success) {
             updatedCount++;
           } else {
-            errors.push(`${city}: ${writeRes.message}`);
+            errors.push(`${file.fileName}: ${writeRes.message}`);
           }
         }
       } catch (err: any) {
-        errors.push(`${city}: ${err.message}`);
+        errors.push(`${file.fileName}: ${err.message}`);
       }
     }
 
@@ -595,14 +663,14 @@ export const BulkKeyManager: React.FC<BulkKeyManagerProps> = ({
         : `'${renameOldKey}' -> '${renameNewKey}' olarak yeniden adlandırıldı.`;
 
     if (errors.length > 0) {
-      onAddLog('warning', `Toplu güncelleme uyarısı (${updatedCount}/${updateTargetCities.length})`, errors.join(', '));
+      onAddLog('warning', `Toplu güncelleme uyarısı (${updatedCount}/${targetFiles.length})`, errors.join(', '));
     } else {
-      onAddLog('success', `Toplu güncelleme başarılı! (${updatedCount} şehir güncellendi)`, desc);
+      onAddLog('success', `Toplu güncelleme başarılı! (${updatedCount} dosyada uygulandı)`, desc);
     }
 
-    setActionSuccessMessage(`${updatedCount} şehirde güncelleme başarıyla uygulandı.`);
+    setActionSuccessMessage(`${updatedCount} dosyada güncelleme başarıyla uygulandı.`);
     setTimeout(() => setActionSuccessMessage(null), 5000);
-    handleLoadCitySecrets();
+    handleLoadSecrets();
   };
 
   return (
@@ -634,7 +702,7 @@ export const BulkKeyManager: React.FC<BulkKeyManagerProps> = ({
             {/* Quick Status Pill */}
             <div className="flex items-center gap-2">
               <button
-                onClick={handleLoadCitySecrets}
+                onClick={handleLoadSecrets}
                 disabled={isLoadingSecrets}
                 className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-md bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 transition-colors disabled:opacity-50"
                 title="Tüm seçili şehirlerin secret'larını yeniden yükle"
@@ -740,13 +808,7 @@ export const BulkKeyManager: React.FC<BulkKeyManagerProps> = ({
               <div className="flex gap-1.5">
                 <select
                   value={selectedApp}
-                  onChange={(e) => {
-                    const newApp = e.target.value;
-                    setSelectedApp(newApp);
-                    const targetCities = appCitiesMap[newApp] || [];
-                    setAllKnownCities(targetCities);
-                    setSelectedCities(targetCities);
-                  }}
+                  onChange={(e) => setSelectedApp(e.target.value)}
                   className="flex-1 bg-slate-900 border border-slate-800 rounded-md px-2.5 py-1.5 text-xs text-slate-200 focus:outline-none focus:border-cyan-500 font-mono"
                 >
                   {availableApps.map((app) => (
@@ -766,9 +828,6 @@ export const BulkKeyManager: React.FC<BulkKeyManagerProps> = ({
                         setAvailableApps((prev) => [...prev, custom]);
                       }
                       setSelectedApp(custom);
-                      const targetCities = appCitiesMap[custom] || [];
-                      setAllKnownCities(targetCities);
-                      setSelectedCities(targetCities);
                       e.currentTarget.value = '';
                     }
                   }}
@@ -783,53 +842,62 @@ export const BulkKeyManager: React.FC<BulkKeyManagerProps> = ({
               <span className="text-[11px] font-semibold uppercase tracking-wider text-slate-400 mb-1">
                 Hedef Vault Yolu Şablonu:
               </span>
-              <div className="bg-slate-900/80 px-2.5 py-1.5 rounded border border-slate-800 font-mono text-[11px] text-cyan-300 truncate" title={`${selectedEngine}/${selectedEnv}/apps-{sehir}/${selectedApp}/{sehir}`}>
-                {selectedEngine}/{selectedEnv}/apps-&#123;sehir&#125;/{selectedApp}/&#123;sehir&#125;
+              <div className="bg-slate-900/80 px-2.5 py-1.5 rounded border border-slate-800 font-mono text-[11px] text-cyan-300 truncate" title={`${selectedEngine}/${selectedEnv}/apps-{sehir}/${selectedApp}/{dosyadi}`}>
+                {selectedEngine}/{selectedEnv}/apps-&#123;sehir&#125;/{selectedApp}/&#123;dosyadi&#125;
               </div>
             </div>
           </div>
 
-          {/* Cities / Apps-Sehir Selection Section */}
+          {/* Files List / Uygulama Dosyaları Section */}
           <div className="space-y-2">
             <div className="flex flex-wrap items-center justify-between gap-2">
               <div className="flex items-center gap-2">
-                <Building2 className="w-4 h-4 text-emerald-400" />
+                <FileCode className="w-4 h-4 text-emerald-400" />
                 <span className="text-xs font-semibold text-slate-300">
-                  Hedef apps-şehir Listesi ({selectedCities.length}/{allKnownCities.length} Seçili):
+                  <span className="text-cyan-300 font-mono">{selectedApp}</span> Altındaki Dosyalar ({selectedFileIds.length}/{allAppFiles.length} Seçili):
                 </span>
-                {allKnownCities.length > 0 && (
+                {allAppFiles.length > 0 && (
                   <div className="flex items-center gap-1.5 ml-2">
                     <button
-                      onClick={() => setSelectedCities([...allKnownCities])}
+                      onClick={handleSelectAllFiles}
                       className="px-2.5 py-0.5 text-xs font-bold font-mono rounded bg-cyan-500/20 text-cyan-300 hover:bg-cyan-500 hover:text-slate-950 border border-cyan-500/40 transition-colors flex items-center gap-1"
-                      title="Tüm apps-şehir Klasörlerini Seç (ALL)"
+                      title="Tüm Dosyaları Seç (ALL)"
                     >
                       <CheckSquare className="w-3 h-3" />
-                      <span>ALL (Tümünü Seç)</span>
+                      <span>ALL ({selectedFileIds.length === allAppFiles.length ? 'Tümünü Kaldır' : 'Tümünü Seç'})</span>
                     </button>
                     <button
-                      onClick={() => setSelectedCities([])}
+                      onClick={() => setSelectedFileIds([])}
                       className="px-2 py-0.5 text-xs text-slate-400 hover:text-slate-200 hover:bg-slate-800 rounded border border-slate-700 transition-colors"
                       title="Seçimi Temizle"
                     >
                       Temizle
                     </button>
+                    <button
+                      onClick={() => loadAppFiles(selectedApp, selectedEnv)}
+                      disabled={isLoadingSecrets}
+                      className="px-2.5 py-0.5 text-xs text-emerald-300 hover:text-emerald-200 bg-emerald-950/40 hover:bg-emerald-900/60 rounded border border-emerald-800/60 transition-colors flex items-center gap-1"
+                      title="Dosya listesini yeniden yükle"
+                    >
+                      <RefreshCw className={`w-3 h-3 ${isLoadingSecrets ? 'animate-spin' : ''}`} />
+                      <span>Yenile</span>
+                    </button>
                   </div>
                 )}
               </div>
 
-              {/* Add Custom apps-sehir */}
+              {/* Add Custom File */}
               <div className="flex items-center gap-1.5">
                 <input
                   type="text"
-                  placeholder="Yeni apps-şehir ekle (örn: apps-antalya)"
-                  value={newCityInput}
-                  onChange={(e) => setNewCityInput(e.target.value)}
-                  onKeyDown={(e) => e.key === 'Enter' && handleAddNewCity()}
-                  className="bg-slate-900 border border-slate-800 rounded px-2.5 py-1 text-xs text-slate-200 placeholder:text-slate-600 focus:outline-none focus:border-emerald-500 w-56 font-mono"
+                  placeholder="Yeni dosya ekle (örn: apps-bursa/bursa veya config)"
+                  value={newFileInput}
+                  onChange={(e) => setNewFileInput(e.target.value)}
+                  onKeyDown={(e) => e.key === 'Enter' && handleAddNewFile()}
+                  className="bg-slate-900 border border-slate-800 rounded px-2.5 py-1 text-xs text-slate-200 placeholder:text-slate-600 focus:outline-none focus:border-emerald-500 w-64 font-mono"
                 />
                 <button
-                  onClick={handleAddNewCity}
+                  onClick={handleAddNewFile}
                   className="px-2.5 py-1 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded border border-slate-700 text-xs font-medium"
                 >
                   Ekle
@@ -837,69 +905,70 @@ export const BulkKeyManager: React.FC<BulkKeyManagerProps> = ({
               </div>
             </div>
 
-            {/* apps-sehir Badges / Multi-selection pills */}
+            {/* File Badges - Listed by File Name */}
             <div className="flex flex-wrap gap-1.5 items-center">
-              {allKnownCities.length === 0 ? (
+              {allAppFiles.length === 0 ? (
                 <div className="bg-slate-900/60 border border-dashed border-slate-800 rounded-lg p-3 text-xs text-slate-400 flex flex-wrap items-center justify-between gap-2 w-full">
                   <div className="flex items-center gap-2">
                     <AlertTriangle className="w-4 h-4 text-amber-400 shrink-0" />
                     <span>
-                      <strong className="text-slate-200 font-mono">{selectedApp || 'Uygulama'}</strong> bu ortamda (<strong className="text-cyan-300 font-mono">{selectedEnv}</strong>) henüz hiçbir apps-şehir klasöründe bulunmuyor.
+                      <strong className="text-slate-200 font-mono">{selectedApp || 'Uygulama'}</strong> altında bu ortamda (<strong className="text-cyan-300 font-mono">{selectedEnv}</strong>) henüz secret dosyası bulunamadı.
                     </span>
                   </div>
                   <span className="text-[11px] text-slate-500">
-                    Yeni bir konuma eklemek için sağdaki alandan ekleyebilir veya "Tüm Vault'u Tara" butonuna tıklayabilirsiniz.
+                    Yukarıdaki alandan yeni dosya ekleyebilir veya "Tüm Vault'u Tara" butonuna tıklayabilirsiniz.
                   </span>
                 </div>
               ) : (
                 <>
                   <button
-                    onClick={() => {
-                      if (selectedCities.length === allKnownCities.length) {
-                        setSelectedCities([]);
-                      } else {
-                        setSelectedCities([...allKnownCities]);
-                      }
-                    }}
+                    onClick={handleSelectAllFiles}
                     className={`flex items-center gap-1.5 px-3 py-1 rounded-md text-xs font-mono font-bold transition-all border ${
-                      selectedCities.length === allKnownCities.length && allKnownCities.length > 0
+                      selectedFileIds.length === allAppFiles.length && allAppFiles.length > 0
                         ? 'bg-cyan-500 text-slate-950 border-cyan-400 shadow-md ring-2 ring-cyan-400/40'
                         : 'bg-slate-900 text-cyan-400 border-cyan-700/60 hover:bg-slate-800 hover:border-cyan-400'
                     }`}
-                    title="Tüm apps-şehir Klasörlerini Seç / Kaldır"
+                    title="Tüm Dosyaları Seç / Kaldır"
                   >
                     <CheckSquare className="w-3.5 h-3.5" />
-                    <span>ALL ({allKnownCities.length})</span>
+                    <span>ALL ({allAppFiles.length})</span>
                   </button>
-                  {allKnownCities.map((city) => {
-                    const isSelected = selectedCities.includes(city);
-                    const cityRef = citySecrets.find((c) => c.city === city);
+                  {sortedAppFiles.map((file) => {
+                    const isSelected = selectedFileIds.includes(file.id);
+                    const fileRef = citySecrets.find((c) => c.fileId === file.id || c.city === file.displayName);
                     const statusColor =
-                      cityRef?.status === 'success'
+                      fileRef?.status === 'success'
                         ? 'border-emerald-500/40 text-emerald-300 bg-emerald-950/20'
-                        : cityRef?.status === 'not_found'
+                        : fileRef?.status === 'not_found'
                         ? 'border-amber-500/30 text-amber-300/70 bg-amber-950/10'
                         : 'border-slate-800 text-slate-400 bg-slate-900';
 
                     return (
                       <button
-                        key={city}
-                        onClick={() => handleToggleCity(city)}
+                        key={file.id}
+                        onClick={() => handleToggleFile(file.id)}
                         className={`flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-mono transition-all border ${
                           isSelected
-                            ? 'bg-slate-800 text-slate-100 border-cyan-500 shadow-sm'
+                            ? 'bg-slate-800 text-slate-100 border-cyan-500 shadow-sm ring-1 ring-cyan-500/30'
                             : `${statusColor} opacity-60 hover:opacity-100`
                         }`}
+                        title={file.path}
                       >
                         {isSelected ? (
                           <CheckSquare className="w-3.5 h-3.5 text-cyan-400" />
                         ) : (
                           <Square className="w-3.5 h-3.5 text-slate-500" />
                         )}
-                        <span className="font-mono text-xs">{city}</span>
-                        {cityRef?.status === 'success' && (
-                          <span className="text-[10px] text-emerald-400 font-sans">
-                            v{cityRef.version}
+                        <FileText className="w-3 h-3 text-cyan-400/80" />
+                        <span className="font-semibold text-slate-100">{file.fileName}</span>
+                        {file.appsFolder && (
+                          <span className="text-[10px] text-slate-400 bg-slate-950 px-1 py-0.2 rounded border border-slate-800 font-sans">
+                            {file.appsFolder}
+                          </span>
+                        )}
+                        {fileRef?.status === 'success' && (
+                          <span className="text-[10px] text-emerald-400 font-sans font-bold">
+                            v{fileRef.version}
                           </span>
                         )}
                       </button>
@@ -1447,50 +1516,56 @@ export const BulkKeyManager: React.FC<BulkKeyManagerProps> = ({
                 </div>
               )}
 
-              {/* Target apps-sehir Selection */}
+              {/* Target Files Selection */}
               <div className="border-t border-slate-800 pt-3 space-y-2">
                 <div className="flex items-center justify-between">
                   <span className="text-xs font-semibold text-slate-300">
-                    Uygulanacak apps-şehir Klasörleri ({addSelectedCities.length}/{selectedCities.length}):
+                    Uygulanacak Hedef Dosyalar ({addSelectedFileIds.length}/{allAppFiles.length}):
                   </span>
                   <div className="flex items-center gap-2">
                     <button
                       type="button"
-                      onClick={() => setAddSelectedCities([...selectedCities])}
+                      onClick={() => setAddSelectedFileIds(allAppFiles.map((f) => f.id))}
                       className="px-2 py-0.5 text-xs font-mono font-bold text-emerald-300 bg-emerald-950/60 hover:bg-emerald-900 border border-emerald-700/60 rounded transition-colors"
-                      title="Tüm apps-şehir Klasörlerini Seç (ALL)"
+                      title="Tüm Dosyaları Seç (ALL)"
                     >
                       ALL (Tümü)
                     </button>
                     <button
                       type="button"
-                      onClick={() => setAddSelectedCities([])}
+                      onClick={() => setAddSelectedFileIds([])}
                       className="px-2 py-0.5 text-xs text-slate-400 hover:text-slate-200 bg-slate-950 border border-slate-800 rounded transition-colors"
                     >
                       Temizle
                     </button>
                   </div>
                 </div>
-                <div className="flex flex-wrap gap-1.5">
-                  {selectedCities.map((city) => {
-                    const isChecked = addSelectedCities.includes(city);
+                <div className="flex flex-wrap gap-1.5 max-h-40 overflow-y-auto pr-1">
+                  {sortedAppFiles.map((file) => {
+                    const isChecked = addSelectedFileIds.includes(file.id);
                     return (
                       <button
-                        key={city}
+                        key={file.id}
+                        type="button"
                         onClick={() =>
-                          setAddSelectedCities((prev) =>
-                            prev.includes(city)
-                              ? prev.filter((c) => c !== city)
-                              : [...prev, city]
+                          setAddSelectedFileIds((prev) =>
+                            prev.includes(file.id)
+                              ? prev.filter((id) => id !== file.id)
+                              : [...prev, file.id]
                           )
                         }
-                        className={`px-2.5 py-1 rounded text-xs font-mono transition-all border ${
+                        className={`px-2.5 py-1 rounded text-xs font-mono transition-all border flex items-center gap-1.5 ${
                           isChecked
-                            ? 'bg-emerald-950 text-emerald-200 border-emerald-500'
-                            : 'bg-slate-950 text-slate-500 border-slate-800'
+                            ? 'bg-emerald-950 text-emerald-200 border-emerald-500 shadow-sm ring-1 ring-emerald-500/40'
+                            : 'bg-slate-950 text-slate-500 border-slate-800 hover:text-slate-300'
                         }`}
+                        title={file.path}
                       >
-                        {city}
+                        <FileText className="w-3 h-3" />
+                        <span className="font-semibold">{file.fileName}</span>
+                        {file.appsFolder && (
+                          <span className="text-[10px] text-slate-400 font-sans">({file.appsFolder})</span>
+                        )}
                       </button>
                     );
                   })}
@@ -1633,50 +1708,56 @@ export const BulkKeyManager: React.FC<BulkKeyManagerProps> = ({
                 </div>
               </div>
 
-              {/* Target apps-sehir Selection */}
+              {/* Target Files Selection */}
               <div className="border-t border-slate-800 pt-3 space-y-2">
                 <div className="flex items-center justify-between">
                   <span className="text-xs font-semibold text-slate-300">
-                    Hangi apps-şehir Klasörlerinden Silinsin? ({deleteTargetCities.length}/{selectedCities.length}):
+                    Hangi Dosyalardan Silinsin? ({deleteTargetFileIds.length}/{allAppFiles.length}):
                   </span>
                   <div className="flex items-center gap-2">
                     <button
                       type="button"
-                      onClick={() => setDeleteTargetCities([...selectedCities])}
+                      onClick={() => setDeleteTargetFileIds(allAppFiles.map((f) => f.id))}
                       className="px-2 py-0.5 text-xs font-mono font-bold text-rose-300 bg-rose-950/60 hover:bg-rose-900 border border-rose-700/60 rounded transition-colors"
-                      title="Tüm apps-şehir Klasörlerini Seç (ALL)"
+                      title="Tüm Dosyaları Seç (ALL)"
                     >
                       ALL (Tümü)
                     </button>
                     <button
                       type="button"
-                      onClick={() => setDeleteTargetCities([])}
+                      onClick={() => setDeleteTargetFileIds([])}
                       className="px-2 py-0.5 text-xs text-slate-400 hover:text-slate-200 bg-slate-950 border border-slate-800 rounded transition-colors"
                     >
                       Temizle
                     </button>
                   </div>
                 </div>
-                <div className="flex flex-wrap gap-1.5">
-                  {selectedCities.map((city) => {
-                    const isChecked = deleteTargetCities.includes(city);
+                <div className="flex flex-wrap gap-1.5 max-h-40 overflow-y-auto pr-1">
+                  {sortedAppFiles.map((file) => {
+                    const isChecked = deleteTargetFileIds.includes(file.id);
                     return (
                       <button
-                        key={city}
+                        key={file.id}
+                        type="button"
                         onClick={() =>
-                          setDeleteTargetCities((prev) =>
-                            prev.includes(city)
-                              ? prev.filter((c) => c !== city)
-                              : [...prev, city]
+                          setDeleteTargetFileIds((prev) =>
+                            prev.includes(file.id)
+                              ? prev.filter((id) => id !== file.id)
+                              : [...prev, file.id]
                           )
                         }
-                        className={`px-2.5 py-1 rounded text-xs font-mono transition-all border ${
+                        className={`px-2.5 py-1 rounded text-xs font-mono transition-all border flex items-center gap-1.5 ${
                           isChecked
-                            ? 'bg-rose-950 text-rose-200 border-rose-500'
-                            : 'bg-slate-950 text-slate-500 border-slate-800'
+                            ? 'bg-rose-950 text-rose-200 border-rose-500 shadow-sm ring-1 ring-rose-500/40'
+                            : 'bg-slate-950 text-slate-500 border-slate-800 hover:text-slate-300'
                         }`}
+                        title={file.path}
                       >
-                        {city}
+                        <FileText className="w-3 h-3" />
+                        <span className="font-semibold">{file.fileName}</span>
+                        {file.appsFolder && (
+                          <span className="text-[10px] text-slate-400 font-sans">({file.appsFolder})</span>
+                        )}
                       </button>
                     );
                   })}
@@ -1851,50 +1932,56 @@ export const BulkKeyManager: React.FC<BulkKeyManagerProps> = ({
                 </div>
               )}
 
-              {/* Target Cities */}
+              {/* Target Files Selection */}
               <div className="border-t border-slate-800 pt-3 space-y-2">
                 <div className="flex items-center justify-between">
                   <span className="text-xs font-semibold text-slate-300">
-                    Uygulanacak apps-şehir Klasörleri ({updateTargetCities.length}/{selectedCities.length}):
+                    Uygulanacak Hedef Dosyalar ({updateTargetFileIds.length}/{allAppFiles.length}):
                   </span>
                   <div className="flex items-center gap-2">
                     <button
                       type="button"
-                      onClick={() => setUpdateTargetCities([...selectedCities])}
+                      onClick={() => setUpdateTargetFileIds(allAppFiles.map((f) => f.id))}
                       className="px-2 py-0.5 text-xs font-mono font-bold text-cyan-300 bg-cyan-950/60 hover:bg-cyan-900 border border-cyan-700/60 rounded transition-colors"
-                      title="Tüm apps-şehir Klasörlerini Seç (ALL)"
+                      title="Tüm Dosyaları Seç (ALL)"
                     >
                       ALL (Tümü)
                     </button>
                     <button
                       type="button"
-                      onClick={() => setUpdateTargetCities([])}
+                      onClick={() => setUpdateTargetFileIds([])}
                       className="px-2 py-0.5 text-xs text-slate-400 hover:text-slate-200 bg-slate-950 border border-slate-800 rounded transition-colors"
                     >
                       Temizle
                     </button>
                   </div>
                 </div>
-                <div className="flex flex-wrap gap-1.5">
-                  {selectedCities.map((city) => {
-                    const isChecked = updateTargetCities.includes(city);
+                <div className="flex flex-wrap gap-1.5 max-h-40 overflow-y-auto pr-1">
+                  {sortedAppFiles.map((file) => {
+                    const isChecked = updateTargetFileIds.includes(file.id);
                     return (
                       <button
-                        key={city}
+                        key={file.id}
+                        type="button"
                         onClick={() =>
-                          setUpdateTargetCities((prev) =>
-                            prev.includes(city)
-                              ? prev.filter((c) => c !== city)
-                              : [...prev, city]
+                          setUpdateTargetFileIds((prev) =>
+                            prev.includes(file.id)
+                              ? prev.filter((id) => id !== file.id)
+                              : [...prev, file.id]
                           )
                         }
-                        className={`px-2.5 py-1 rounded text-xs font-mono transition-all border ${
+                        className={`px-2.5 py-1 rounded text-xs font-mono transition-all border flex items-center gap-1.5 ${
                           isChecked
-                            ? 'bg-cyan-950 text-cyan-200 border-cyan-500'
-                            : 'bg-slate-950 text-slate-500 border-slate-800'
+                            ? 'bg-cyan-950 text-cyan-200 border-cyan-500 shadow-sm ring-1 ring-cyan-500/40'
+                            : 'bg-slate-950 text-slate-500 border-slate-800 hover:text-slate-300'
                         }`}
+                        title={file.path}
                       >
-                        {city}
+                        <FileText className="w-3 h-3" />
+                        <span className="font-semibold">{file.fileName}</span>
+                        {file.appsFolder && (
+                          <span className="text-[10px] text-slate-400 font-sans">({file.appsFolder})</span>
+                        )}
                       </button>
                     );
                   })}
