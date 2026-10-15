@@ -40,8 +40,11 @@ async function callVault(
   body?: any,
   namespace?: string
 ) {
-  const cleanBase = vaultUrl.replace(/\/+$/, '');
-  const cleanPath = vaultPath.replace(/^\/+/, '');
+  let cleanBase = (vaultUrl || '').trim().replace(/\/+$/, '');
+  if (cleanBase && !cleanBase.startsWith('http://') && !cleanBase.startsWith('https://')) {
+    cleanBase = `http://${cleanBase}`;
+  }
+  const cleanPath = (vaultPath || '').replace(/^\/+/, '');
 
   // Generate candidate base URLs if user specifies localhost or 127.0.0.1 in Docker
   const candidateBases: string[] = [cleanBase];
@@ -70,7 +73,7 @@ async function callVault(
   for (const base of candidateBases) {
     const url = `${base}/v1/${cleanPath}`;
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 6000); // 6s timeout per candidate
+    const timeoutId = setTimeout(() => controller.abort(), 3500); // 3.5s timeout per candidate for responsive failure
 
     try {
       const response = await fetch(url, {

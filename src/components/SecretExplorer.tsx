@@ -21,19 +21,46 @@ import {
 interface SecretExplorerProps {
   connection: VaultConnection;
   onAddLog: (type: 'info' | 'success' | 'warning' | 'error', message: string, details?: string) => void;
+  onUpdateConnection?: (updated: Partial<VaultConnection>) => void;
 }
 
-export const SecretExplorer: React.FC<SecretExplorerProps> = ({ connection, onAddLog }) => {
+export const SecretExplorer: React.FC<SecretExplorerProps> = ({
+  connection,
+  onAddLog,
+  onUpdateConnection,
+}) => {
   const [currentPath, setCurrentPath] = useState<string>('');
   const [items, setItems] = useState<string[]>([]);
   const [loading, setLoading] = useState(false);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [searchTerm, setSearchTerm] = useState('');
 
-  // Stable ref for onAddLog
+  // Available engines for quick switching
+  const [availableEngines, setAvailableEngines] = useState<string[]>([
+    'asis',
+    'secret',
+    'secrets',
+  ]);
+
+  // Stable ref for onAddLog and connection
   const onAddLogRef = useRef(onAddLog);
   useEffect(() => {
     onAddLogRef.current = onAddLog;
   }, [onAddLog]);
+
+  const connectionRef = useRef(connection);
+  useEffect(() => {
+    connectionRef.current = connection;
+  }, [connection]);
+
+  // Fetch available engines on connection change
+  useEffect(() => {
+    VaultApiService.getEngines(connection).then((res) => {
+      if (res.engines && res.engines.length > 0) {
+        setAvailableEngines((prev) => Array.from(new Set([...prev, ...res.engines])));
+      }
+    }).catch(() => {});
+  }, [connection.url, connection.token, connection.isDemoMode]);
 
   // Selected Secret for editing
   const [selectedSecretPath, setSelectedSecretPath] = useState<string | null>(null);
@@ -46,31 +73,54 @@ export const SecretExplorer: React.FC<SecretExplorerProps> = ({ connection, onAd
   const [newSecretTemplate, setNewSecretTemplate] = useState<'appsettings' | 'simple' | 'empty'>('appsettings');
   const [isCreatingSecret, setIsCreatingSecret] = useState(false);
 
-  // Load items at current path
+  const isRequestInProgress = useRef(false);
+
+  // Load items at current path with loop-guard
   const loadPath = useCallback(
-    async (path: string) => {
+    async (path: string, overrideEngine?: string) => {
+      if (isRequestInProgress.current) return;
+      isRequestInProgress.current = true;
       setLoading(true);
+      setErrorMessage(null);
+      const targetConn = {
+        ...connectionRef.current,
+        ...(overrideEngine ? { engine: overrideEngine } : {}),
+      };
+
       try {
-        const res = await VaultApiService.listPath(connection, path);
+        const res = await VaultApiService.listPath(targetConn, path);
         if (res.success) {
           setItems(res.keys || []);
+          setErrorMessage(null);
         } else {
           setItems([]);
-          onAddLogRef.current('warning', `Dizin listelenemedi (${path || 'root'}): ${res.error}`);
+          setErrorMessage(res.error || 'Dizin listelenemedi');
+          onAddLogRef.current(
+            'warning',
+            `Dizin listelenemedi (${targetConn.engine}/${path || 'root'}): ${res.error || 'Boş veya ulaşılamadı'}`
+          );
         }
       } catch (err: any) {
+        setItems([]);
+        setErrorMessage(err.message || 'Bağlantı hatası');
         onAddLogRef.current('error', `Hata: ${err.message}`);
       } finally {
         setLoading(false);
+        isRequestInProgress.current = false;
       }
     },
-    [connection.url, connection.token, connection.engine, connection.isDemoMode]
+    []
   );
 
-  // Initial load and reload on engine change
+  // Initial load and reload ONLY on explicit primitive value changes
+  const prevLoadParamsRef = useRef('');
   useEffect(() => {
-    loadPath(currentPath);
-  }, [loadPath, currentPath, connection.engine]);
+    const key = `${connection.url}|${connection.token}|${connection.engine}|${connection.isDemoMode}|${currentPath}`;
+    if (prevLoadParamsRef.current !== key) {
+      prevLoadParamsRef.current = key;
+      loadPath(currentPath);
+    }
+  }, [currentPath, connection.engine, connection.url, connection.token, connection.isDemoMode, loadPath]);
 
   // Load specific secret
   const handleSelectSecret = async (fullPath: string, targetVersion?: number) => {
@@ -206,19 +256,34 @@ export const SecretExplorer: React.FC<SecretExplorerProps> = ({ connection, onAd
         <div className="p-3 border-b border-slate-800 flex items-center justify-between gap-2">
           <div className="flex items-center gap-1.5 min-w-0">
             <Database className="w-4 h-4 text-cyan-400 shrink-0" />
-            <span className="font-mono text-xs font-semibold text-slate-200 truncate">
-              {connection.engine}
-            </span>
-            <span className="text-slate-600">/</span>
+            <select
+              value={connection.engine}
+              onChange={(e) => {
+                const newEng = e.target.value;
+                onUpdateConnection?.({ engine: newEng });
+                setCurrentPath('');
+                loadPath('', newEng);
+              }}
+              className="bg-slate-950 border border-slate-800 hover:border-slate-700 rounded px-2 py-1 text-xs font-mono font-semibold text-cyan-300 focus:outline-none focus:border-cyan-500 max-w-[130px] cursor-pointer"
+              title="Secret Engine Seç (Mount Point)"
+            >
+              {Array.from(new Set([...availableEngines, connection.engine])).map((eng) => (
+                <option key={eng} value={eng}>
+                  {eng}
+                </option>
+              ))}
+            </select>
+            <span className="text-slate-600 font-mono">/</span>
           </div>
 
           <div className="flex items-center gap-1">
             <button
               onClick={() => loadPath(currentPath)}
-              title="Yenile"
-              className="p-1.5 text-slate-400 hover:text-slate-200 hover:bg-slate-800 rounded transition-colors"
+              title="Dizini Yenile"
+              disabled={loading}
+              className="p-1.5 text-slate-400 hover:text-slate-200 hover:bg-slate-800 rounded transition-colors disabled:opacity-50"
             >
-              <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`} />
+              <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin text-cyan-400' : ''}`} />
             </button>
             <button
               onClick={() => setShowNewSecretModal(true)}
@@ -283,12 +348,36 @@ export const SecretExplorer: React.FC<SecretExplorerProps> = ({ connection, onAd
           )}
 
           {loading ? (
-            <div className="p-6 text-center text-xs text-slate-500 font-mono">
-              Secret listesi yükleniyor...
+            <div className="p-6 text-center text-xs text-slate-400 font-mono flex flex-col items-center justify-center gap-2">
+              <RefreshCw className="w-4 h-4 text-cyan-400 animate-spin" />
+              <span>Secret listesi yükleniyor...</span>
+            </div>
+          ) : errorMessage && filteredItems.length === 0 ? (
+            <div className="p-4 bg-amber-950/30 border border-amber-800/40 rounded-md text-xs text-amber-200 space-y-2 m-2">
+              <div className="font-semibold text-amber-300 flex items-center gap-1.5">
+                <Database className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+                <span>Dizin Listelenemedi</span>
+              </div>
+              <p className="text-[11px] text-amber-200/90 leading-relaxed font-mono">
+                {errorMessage}
+              </p>
+              <div className="text-[11px] text-slate-400 pt-1 border-t border-amber-900/40 space-y-1">
+                <p>• Hedef Vault sunucusu ({connection.url}) erişilebilir mi?</p>
+                <p>• Secret Engine ({connection.engine}) doğru mu? Yukarıdaki açılır kutudan başka bir engine (örn: secret, asis) deneyebilirsiniz.</p>
+              </div>
+              <button
+                onClick={() => loadPath(currentPath)}
+                className="mt-2 w-full px-2.5 py-1 bg-amber-900/50 hover:bg-amber-800/60 text-amber-100 rounded text-xs font-medium border border-amber-700/50 transition-colors"
+              >
+                Tekrar Dene
+              </button>
             </div>
           ) : filteredItems.length === 0 ? (
-            <div className="p-6 text-center text-xs text-slate-500">
-              Bu dizinde listelenecek secret bulunamadı.
+            <div className="p-6 text-center text-xs text-slate-500 space-y-2">
+              <p>Bu dizinde listelenecek secret bulunamadı.</p>
+              <p className="text-[11px] text-slate-600">
+                Farklı bir engine seçebilir veya sağ üstteki (+) butonuyla yeni bir secret ekleyebilirsiniz.
+              </p>
             </div>
           ) : (
             filteredItems.map((item) => {

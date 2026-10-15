@@ -211,20 +211,25 @@ export const BulkKeyManager: React.FC<BulkKeyManagerProps> = ({
       setAppCitiesMap(currentMap);
 
       let targetApp = selectedApp;
+      let willTriggerEffect = false;
       if (res.apps && res.apps.length > 0) {
         setAvailableApps(res.apps);
         if (!res.apps.includes(selectedApp)) {
           targetApp = res.apps[0];
           setSelectedApp(targetApp);
+          willTriggerEffect = true;
         }
       }
 
       if (res.detectedEngine && res.detectedEngine !== selectedEngine) {
         setSelectedEngine(res.detectedEngine);
         onUpdateConnectionRef.current?.({ engine: res.detectedEngine });
+        willTriggerEffect = true;
       }
 
-      await loadAppFiles(targetApp, selectedEnv);
+      if (!willTriggerEffect) {
+        await loadAppFiles(targetApp, selectedEnv);
+      }
     } catch (err: any) {
       onAddLogRef.current('warning', 'Vault keşfi sırasında uyarı', err.message);
     } finally {
@@ -334,14 +339,20 @@ export const BulkKeyManager: React.FC<BulkKeyManagerProps> = ({
     handleLoadSecretsRef.current = handleLoadSecrets;
   });
 
-  // Auto load when selected files change or when files list is populated
+  // Auto load when selected files change or when files list is populated (with loop guard)
+  const lastLoadedSecretsKeyRef = useRef<string>('');
   useEffect(() => {
+    const key = `${activeConnection.url}|${selectedEngine}|${selectedEnv}|${selectedApp}|${selectedFilesKey}`;
     if (selectedFilesKey && allFilesKey) {
-      handleLoadSecretsRef.current();
+      if (lastLoadedSecretsKeyRef.current !== key) {
+        lastLoadedSecretsKeyRef.current = key;
+        handleLoadSecretsRef.current();
+      }
     } else if (!selectedFilesKey) {
+      lastLoadedSecretsKeyRef.current = '';
       setCitySecrets([]);
     }
-  }, [selectedFilesKey, allFilesKey]);
+  }, [selectedFilesKey, allFilesKey, selectedEngine, selectedEnv, selectedApp, activeConnection.url]);
 
   // Aggregate keys across loaded city secrets
   const aggregatedKeys: AggregatedKeyRow[] = useMemo(() => {

@@ -148,7 +148,11 @@ export default function App() {
       {/* Main View Port */}
       <main className="flex-1 flex flex-col overflow-hidden">
         {activeTab === 'explorer' && (
-          <SecretExplorer connection={connection} onAddLog={addLog} />
+          <SecretExplorer
+            connection={connection}
+            onAddLog={addLog}
+            onUpdateConnection={updateConnection}
+          />
         )}
 
         {activeTab === 'bulk_keys' && (

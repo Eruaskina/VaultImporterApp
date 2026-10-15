@@ -134,7 +134,7 @@ export const ConnectionSettings: React.FC<ConnectionSettingsProps> = ({
       );
 
       if (res.success) {
-        onUpdateConnection({ isConnected: true });
+        onUpdateConnection({ isConnected: true, isDemoMode: false });
         setTestResult({
           success: true,
           message: res.message,
