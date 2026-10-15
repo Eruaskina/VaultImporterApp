@@ -358,14 +358,11 @@ app.post('/api/vault/discover', async (req: Request, res: Response) => {
         if (['prod', 'test', 'dev'].includes(cleanRk.toLowerCase())) {
           envsToCheck.add(cleanRk);
         } else if (cleanRk.startsWith('apps-')) {
-          const cityName = cleanRk.replace(/^apps-/, '').toLowerCase();
-          if (cityName) {
-            discoveredCities.add(cityName);
-            const appKeys = await vaultListDirect(url, eng, cleanRk, token, namespace);
-            for (const ak of appKeys) {
-              const app = ak.replace(/\/$/, '');
-              if (app && app !== cityName) discoveredApps.add(app);
-            }
+          discoveredCities.add(cleanRk.toLowerCase());
+          const appKeys = await vaultListDirect(url, eng, cleanRk, token, namespace);
+          for (const ak of appKeys) {
+            const app = ak.replace(/\/$/, '');
+            if (app && app !== cleanRk.replace(/^apps-/, '')) discoveredApps.add(app);
           }
         }
       }
@@ -376,30 +373,27 @@ app.post('/api/vault/discover', async (req: Request, res: Response) => {
         for (const ek of envKeys) {
           const cleanEk = ek.replace(/\/$/, '');
           if (cleanEk.startsWith('apps-')) {
-            const cityName = cleanEk.replace(/^apps-/, '').toLowerCase();
-            if (cityName) discoveredCities.add(cityName);
+            // E.g. apps-tekirdag, apps-istanbul
+            discoveredCities.add(cleanEk.toLowerCase());
 
             // e.g. prod/apps-tekirdag -> list to get application names!
             const appKeys = await vaultListDirect(url, eng, `${envFolder}/${cleanEk}`, token, namespace);
             for (const ak of appKeys) {
               const app = ak.replace(/\/$/, '');
-              if (app && app !== cityName && !app.endsWith('.json')) {
+              if (app && app !== cleanEk.replace(/^apps-/, '') && !app.endsWith('.json')) {
                 discoveredApps.add(app);
               }
             }
           } else if (cleanEk) {
-            // E.g. prod/afc-saas-api or prod/tekirdag
+            // E.g. prod/afc-saas-api
             const subKeys = await vaultListDirect(url, eng, `${envFolder}/${cleanEk}`, token, namespace);
             if (subKeys.length > 0) {
-              // If it contains folders, test if it's an app name
               if (!['apps', 'user', 'users'].includes(cleanEk)) {
                 discoveredApps.add(cleanEk);
               }
               for (const sk of subKeys) {
                 const cleanSk = sk.replace(/\/$/, '').toLowerCase();
                 if (cleanSk.startsWith('apps-')) {
-                  discoveredCities.add(cleanSk.replace(/^apps-/, ''));
-                } else if (!cleanSk.includes('.') && cleanSk.length <= 15) {
                   discoveredCities.add(cleanSk);
                 }
               }
@@ -419,7 +413,7 @@ app.post('/api/vault/discover', async (req: Request, res: Response) => {
 
   // Ensure default standards are included so UI always has choices
   ['afc-saas-api', 'afc-saas'].forEach((a) => discoveredApps.add(a));
-  ['istanbul', 'ankara', 'izmir', 'tekirdag', 'bursa'].forEach((c) => discoveredCities.add(c));
+  ['apps-tekirdag', 'apps-istanbul', 'apps-ankara', 'apps-izmir', 'apps-bursa'].forEach((c) => discoveredCities.add(c));
 
   res.json({
     success: true,

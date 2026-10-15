@@ -70,18 +70,18 @@ export const BulkKeyManager: React.FC<BulkKeyManagerProps> = ({
   const [selectedApp, setSelectedApp] = useState<string>(connection.appName || 'afc-saas-api');
   const [availableApps, setAvailableApps] = useState<string[]>(['afc-saas-api', 'afc-saas']);
   const [allKnownCities, setAllKnownCities] = useState<string[]>([
-    'istanbul',
-    'ankara',
-    'izmir',
-    'tekirdag',
-    'bursa',
+    'apps-tekirdag',
+    'apps-istanbul',
+    'apps-ankara',
+    'apps-izmir',
+    'apps-bursa',
   ]);
   const [selectedCities, setSelectedCities] = useState<string[]>([
-    'istanbul',
-    'ankara',
-    'izmir',
-    'tekirdag',
-    'bursa',
+    'apps-tekirdag',
+    'apps-istanbul',
+    'apps-ankara',
+    'apps-izmir',
+    'apps-bursa',
   ]);
   const [newCityInput, setNewCityInput] = useState('');
   const [isScouting, setIsScouting] = useState(false);
@@ -167,7 +167,7 @@ export const BulkKeyManager: React.FC<BulkKeyManagerProps> = ({
       onAddLog(
         'info',
         `Vault keşfi tamamlandı (${selectedEnv} ortamı, Engine: ${res.detectedEngine || selectedEngine})`,
-        `${res.cities.length} şehir ve ${res.apps.length} uygulama bulundu.`
+        `${res.cities.length} apps-şehir klasörü ve ${res.apps.length} uygulama bulundu.`
       );
     } catch (err: any) {
       onAddLog('warning', 'Vault keşfi sırasında uyarı', err.message);
@@ -314,7 +314,10 @@ export const BulkKeyManager: React.FC<BulkKeyManagerProps> = ({
 
   const handleAddNewCity = () => {
     if (!newCityInput.trim()) return;
-    const clean = newCityInput.trim().toLowerCase();
+    let clean = newCityInput.trim().toLowerCase();
+    if (!clean.startsWith('apps-')) {
+      clean = `apps-${clean}`;
+    }
     if (!allKnownCities.includes(clean)) {
       setAllKnownCities((prev) => [...prev, clean]);
     }
@@ -762,19 +765,19 @@ export const BulkKeyManager: React.FC<BulkKeyManagerProps> = ({
             </div>
           </div>
 
-          {/* Cities Selection Section */}
+          {/* Cities / Apps-Sehir Selection Section */}
           <div className="space-y-2">
             <div className="flex flex-wrap items-center justify-between gap-2">
               <div className="flex items-center gap-2">
                 <Building2 className="w-4 h-4 text-emerald-400" />
                 <span className="text-xs font-semibold text-slate-300">
-                  Hedef Şehirler ({selectedCities.length}/{allKnownCities.length} Seçili):
+                  Hedef apps-şehir Listesi ({selectedCities.length}/{allKnownCities.length} Seçili):
                 </span>
                 <div className="flex items-center gap-1.5 ml-2">
                   <button
                     onClick={() => setSelectedCities([...allKnownCities])}
                     className="px-2.5 py-0.5 text-xs font-bold font-mono rounded bg-cyan-500/20 text-cyan-300 hover:bg-cyan-500 hover:text-slate-950 border border-cyan-500/40 transition-colors flex items-center gap-1"
-                    title="Tüm Şehirleri Seç (ALL)"
+                    title="Tüm apps-şehir Klasörlerini Seç (ALL)"
                   >
                     <CheckSquare className="w-3 h-3" />
                     <span>ALL (Tümünü Seç)</span>
@@ -789,26 +792,26 @@ export const BulkKeyManager: React.FC<BulkKeyManagerProps> = ({
                 </div>
               </div>
 
-              {/* Add Custom City */}
+              {/* Add Custom apps-sehir */}
               <div className="flex items-center gap-1.5">
                 <input
                   type="text"
-                  placeholder="Yeni şehir ekle (örn: antalya)"
+                  placeholder="Yeni apps-şehir ekle (örn: apps-antalya)"
                   value={newCityInput}
                   onChange={(e) => setNewCityInput(e.target.value)}
                   onKeyDown={(e) => e.key === 'Enter' && handleAddNewCity()}
-                  className="bg-slate-900 border border-slate-800 rounded px-2.5 py-1 text-xs text-slate-200 placeholder:text-slate-600 focus:outline-none focus:border-emerald-500 w-44"
+                  className="bg-slate-900 border border-slate-800 rounded px-2.5 py-1 text-xs text-slate-200 placeholder:text-slate-600 focus:outline-none focus:border-emerald-500 w-56 font-mono"
                 />
                 <button
                   onClick={handleAddNewCity}
-                  className="px-2 py-1 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded border border-slate-700 text-xs font-medium"
+                  className="px-2.5 py-1 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded border border-slate-700 text-xs font-medium"
                 >
                   Ekle
                 </button>
               </div>
             </div>
 
-            {/* City Badges / Multi-selection pills */}
+            {/* apps-sehir Badges / Multi-selection pills */}
             <div className="flex flex-wrap gap-1.5 items-center">
               <button
                 onClick={() => {
@@ -823,7 +826,7 @@ export const BulkKeyManager: React.FC<BulkKeyManagerProps> = ({
                     ? 'bg-cyan-500 text-slate-950 border-cyan-400 shadow-md ring-2 ring-cyan-400/40'
                     : 'bg-slate-900 text-cyan-400 border-cyan-700/60 hover:bg-slate-800 hover:border-cyan-400'
                 }`}
-                title="Tüm Şehirleri Seç / Kaldır"
+                title="Tüm apps-şehir Klasörlerini Seç / Kaldır"
               >
                 <CheckSquare className="w-3.5 h-3.5" />
                 <span>ALL ({allKnownCities.length})</span>
@@ -853,7 +856,7 @@ export const BulkKeyManager: React.FC<BulkKeyManagerProps> = ({
                     ) : (
                       <Square className="w-3.5 h-3.5 text-slate-500" />
                     )}
-                    <span className="capitalize">{city}</span>
+                    <span className="font-mono text-xs">{city}</span>
                     {cityRef?.status === 'success' && (
                       <span className="text-[10px] text-emerald-400 font-sans">
                         v{cityRef.version}
@@ -1056,7 +1059,7 @@ export const BulkKeyManager: React.FC<BulkKeyManagerProps> = ({
                       </th>
                       <th className="py-2.5 px-3 w-80">Anahtar (Key Path)</th>
                       <th className="py-2.5 px-3">Değer (Value) / Durum</th>
-                      <th className="py-2.5 px-3 w-40 text-center">Bulunduğu Şehirler</th>
+                      <th className="py-2.5 px-3 w-44 text-center">Bulunduğu apps-şehir</th>
                       <th className="py-2.5 px-3 w-24 text-center">Tür</th>
                       <th className="py-2.5 px-3 w-28 text-right">Aksiyonlar</th>
                     </tr>
@@ -1163,7 +1166,7 @@ export const BulkKeyManager: React.FC<BulkKeyManagerProps> = ({
                                       }
                                       className="text-xs text-cyan-400 hover:text-cyan-300 flex items-center gap-0.5 font-sans underline"
                                     >
-                                      <span>{isExpanded ? 'Gizle' : 'Şehir Bazlı Listele'}</span>
+                                      <span>{isExpanded ? 'Gizle' : 'apps-şehir Bazlı Listele'}</span>
                                       {isExpanded ? <ChevronDown className="w-3 h-3" /> : <ChevronRight className="w-3 h-3" />}
                                     </button>
                                   </div>
@@ -1180,7 +1183,7 @@ export const BulkKeyManager: React.FC<BulkKeyManagerProps> = ({
                                     : 'bg-amber-950/60 text-amber-300 border border-amber-800/40'
                                 }`}
                               >
-                                {item.presentInCities.length} / {selectedCities.length} Şehir
+                                {item.presentInCities.length} / {selectedCities.length} apps-şehir
                               </span>
                             </td>
 
@@ -1217,7 +1220,7 @@ export const BulkKeyManager: React.FC<BulkKeyManagerProps> = ({
                                 <div className="bg-slate-900 border border-slate-800 rounded-md p-3 space-y-2">
                                   <div className="text-[11px] font-semibold text-amber-300 uppercase tracking-wider flex items-center gap-1.5">
                                     <AlertTriangle className="w-3.5 h-3.5" />
-                                    <span>Şehir Bazında Mevcut Değerler:</span>
+                                    <span>apps-şehir Bazında Mevcut Değerler:</span>
                                   </div>
                                   <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
                                     {Object.entries(item.cityValues).map(([city, val]) => (
@@ -1226,7 +1229,7 @@ export const BulkKeyManager: React.FC<BulkKeyManagerProps> = ({
                                         className="bg-slate-950 p-2 rounded border border-slate-800/80 flex flex-col gap-1"
                                       >
                                         <div className="flex items-center justify-between">
-                                          <span className="text-xs font-semibold text-slate-300 capitalize flex items-center gap-1">
+                                          <span className="text-xs font-semibold text-slate-300 font-mono flex items-center gap-1">
                                             <Building2 className="w-3 h-3 text-cyan-400" />
                                             {city}
                                           </span>
@@ -1402,18 +1405,18 @@ export const BulkKeyManager: React.FC<BulkKeyManagerProps> = ({
                 </div>
               )}
 
-              {/* Target Cities Selection */}
+              {/* Target apps-sehir Selection */}
               <div className="border-t border-slate-800 pt-3 space-y-2">
                 <div className="flex items-center justify-between">
                   <span className="text-xs font-semibold text-slate-300">
-                    Uygulanacak Şehirler ({addSelectedCities.length}/{selectedCities.length}):
+                    Uygulanacak apps-şehir Klasörleri ({addSelectedCities.length}/{selectedCities.length}):
                   </span>
                   <div className="flex items-center gap-2">
                     <button
                       type="button"
                       onClick={() => setAddSelectedCities([...selectedCities])}
                       className="px-2 py-0.5 text-xs font-mono font-bold text-emerald-300 bg-emerald-950/60 hover:bg-emerald-900 border border-emerald-700/60 rounded transition-colors"
-                      title="Tüm Şehirleri Seç (ALL)"
+                      title="Tüm apps-şehir Klasörlerini Seç (ALL)"
                     >
                       ALL (Tümü)
                     </button>
@@ -1439,7 +1442,7 @@ export const BulkKeyManager: React.FC<BulkKeyManagerProps> = ({
                               : [...prev, city]
                           )
                         }
-                        className={`px-2.5 py-1 rounded text-xs font-mono capitalize transition-all border ${
+                        className={`px-2.5 py-1 rounded text-xs font-mono transition-all border ${
                           isChecked
                             ? 'bg-emerald-950 text-emerald-200 border-emerald-500'
                             : 'bg-slate-950 text-slate-500 border-slate-800'
@@ -1565,7 +1568,7 @@ export const BulkKeyManager: React.FC<BulkKeyManagerProps> = ({
                           <div className="bg-slate-900/80 p-2.5 rounded border border-amber-900/30 space-y-1.5">
                             <div className="text-[11px] font-semibold text-amber-300 flex items-center gap-1">
                               <AlertTriangle className="w-3 h-3" />
-                              <span>Şehirler Arasında Farklı Değerler Bulunuyor ({row.uniqueValues.length} farklı):</span>
+                              <span>apps-şehir Klasörleri Arasında Farklı Değerler Bulunuyor ({row.uniqueValues.length} farklı):</span>
                             </div>
                             <div className="grid grid-cols-1 sm:grid-cols-2 gap-1 text-[11px] font-mono">
                               {Object.entries(row.cityValues).map(([city, val]) => (
@@ -1573,7 +1576,7 @@ export const BulkKeyManager: React.FC<BulkKeyManagerProps> = ({
                                   key={city}
                                   className="bg-slate-950 px-2 py-1 rounded flex items-center justify-between gap-2"
                                 >
-                                  <span className="text-slate-400 capitalize">{city}:</span>
+                                  <span className="text-slate-400 font-mono">{city}:</span>
                                   <span className="text-amber-200 truncate max-w-[140px]">
                                     {isSensitive ? '••••••••' : String(val)}
                                   </span>
@@ -1588,18 +1591,18 @@ export const BulkKeyManager: React.FC<BulkKeyManagerProps> = ({
                 </div>
               </div>
 
-              {/* Target Cities Selection */}
+              {/* Target apps-sehir Selection */}
               <div className="border-t border-slate-800 pt-3 space-y-2">
                 <div className="flex items-center justify-between">
                   <span className="text-xs font-semibold text-slate-300">
-                    Hangi Şehirlerden Silinsin? ({deleteTargetCities.length}/{selectedCities.length}):
+                    Hangi apps-şehir Klasörlerinden Silinsin? ({deleteTargetCities.length}/{selectedCities.length}):
                   </span>
                   <div className="flex items-center gap-2">
                     <button
                       type="button"
                       onClick={() => setDeleteTargetCities([...selectedCities])}
                       className="px-2 py-0.5 text-xs font-mono font-bold text-rose-300 bg-rose-950/60 hover:bg-rose-900 border border-rose-700/60 rounded transition-colors"
-                      title="Tüm Şehirleri Seç (ALL)"
+                      title="Tüm apps-şehir Klasörlerini Seç (ALL)"
                     >
                       ALL (Tümü)
                     </button>
@@ -1625,7 +1628,7 @@ export const BulkKeyManager: React.FC<BulkKeyManagerProps> = ({
                               : [...prev, city]
                           )
                         }
-                        className={`px-2.5 py-1 rounded text-xs font-mono capitalize transition-all border ${
+                        className={`px-2.5 py-1 rounded text-xs font-mono transition-all border ${
                           isChecked
                             ? 'bg-rose-950 text-rose-200 border-rose-500'
                             : 'bg-slate-950 text-slate-500 border-slate-800'
@@ -1810,14 +1813,14 @@ export const BulkKeyManager: React.FC<BulkKeyManagerProps> = ({
               <div className="border-t border-slate-800 pt-3 space-y-2">
                 <div className="flex items-center justify-between">
                   <span className="text-xs font-semibold text-slate-300">
-                    Uygulanacak Şehirler ({updateTargetCities.length}/{selectedCities.length}):
+                    Uygulanacak apps-şehir Klasörleri ({updateTargetCities.length}/{selectedCities.length}):
                   </span>
                   <div className="flex items-center gap-2">
                     <button
                       type="button"
                       onClick={() => setUpdateTargetCities([...selectedCities])}
                       className="px-2 py-0.5 text-xs font-mono font-bold text-cyan-300 bg-cyan-950/60 hover:bg-cyan-900 border border-cyan-700/60 rounded transition-colors"
-                      title="Tüm Şehirleri Seç (ALL)"
+                      title="Tüm apps-şehir Klasörlerini Seç (ALL)"
                     >
                       ALL (Tümü)
                     </button>
@@ -1843,7 +1846,7 @@ export const BulkKeyManager: React.FC<BulkKeyManagerProps> = ({
                               : [...prev, city]
                           )
                         }
-                        className={`px-2.5 py-1 rounded text-xs font-mono capitalize transition-all border ${
+                        className={`px-2.5 py-1 rounded text-xs font-mono transition-all border ${
                           isChecked
                             ? 'bg-cyan-950 text-cyan-200 border-cyan-500'
                             : 'bg-slate-950 text-slate-500 border-slate-800'

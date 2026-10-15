@@ -280,27 +280,30 @@ export class VaultApiService {
 
   /**
    * Generates standard city secret path.
-   * For prod: strictly `prod/apps-{city}/{app}/{city}` (no user-specific secrets)
+   * Format: {env}/apps-{sehir}/{app}/{sehir}
+   * Supports both 'apps-tekirdag' and 'tekirdag' as input.
    */
   static getCitySecretPath(
     env: VaultEnvironment,
-    city: string,
+    cityOrAppsFolder: string,
     appName: string
   ): string {
-    const cleanCity = city.trim().toLowerCase();
+    const cleanTarget = cityOrAppsFolder.trim().toLowerCase();
     const cleanApp = appName.trim() || 'afc-saas-api';
-    return `${env}/apps-${cleanCity}/${cleanApp}/${cleanCity}`;
+    const folder = cleanTarget.startsWith('apps-') ? cleanTarget : `apps-${cleanTarget}`;
+    const leafCity = cleanTarget.startsWith('apps-') ? cleanTarget.replace(/^apps-/, '') : cleanTarget;
+    return `${env}/${folder}/${cleanApp}/${leafCity}`;
   }
 
   /**
    * Discovers all existing apps and cities from Vault or Mock store.
-   * Scans across environments (prod, test, dev) and engines to find every application.
+   * Scans across environments (prod, test, dev) and engines to find every application and apps-sehir folder.
    */
   static async discoverAppsAndCities(
     conn: VaultConnection,
     env: VaultEnvironment
   ): Promise<{ apps: string[]; cities: string[]; detectedEngine?: string }> {
-    const defaultCities = ['istanbul', 'ankara', 'izmir', 'tekirdag', 'bursa'];
+    const defaultCities = ['apps-tekirdag', 'apps-istanbul', 'apps-ankara', 'apps-izmir', 'apps-bursa'];
     const defaultApps = ['afc-saas-api', 'afc-saas'];
 
     if (conn.isDemoMode) {
@@ -311,16 +314,16 @@ export class VaultApiService {
       for (const eng of engines) {
         const allPaths = MockVaultService.getAllSecretPaths(eng);
         for (const p of allPaths) {
-          // Check standard patterns: {env}/apps-{city}/{app}/{city}
-          const regex1 = /(?:^|\/)(?:prod|test|dev)\/apps-([^/]+)\/([^/]+)/i;
+          // Check standard patterns: {env}/(apps-{city})/{app}/{city}
+          const regex1 = /(?:^|\/)(?:prod|test|dev)\/(apps-[^/]+)\/([^/]+)/i;
           const match1 = p.match(regex1);
           if (match1) {
             citiesSet.add(match1[1].toLowerCase());
             appsSet.add(match1[2]);
           }
 
-          // Check direct pattern: apps-{city}/{app}
-          const regex2 = /(?:^|\/)apps-([^/]+)\/([^/]+)/i;
+          // Check direct pattern: (apps-{city})/{app}
+          const regex2 = /(?:^|\/)(apps-[^/]+)\/([^/]+)/i;
           const match2 = p.match(regex2);
           if (match2) {
             citiesSet.add(match2[1].toLowerCase());
@@ -379,15 +382,14 @@ export class VaultApiService {
           for (const k of rootRes.keys) {
             const cleanKey = k.replace(/\/$/, '');
             if (cleanKey.startsWith('apps-')) {
-              const cityName = cleanKey.replace(/^apps-/, '').toLowerCase();
-              if (cityName) citiesSet.add(cityName);
+              citiesSet.add(cleanKey.toLowerCase());
 
               // Probe this city for applications
               const cityRes = await this.listPath(conn, `${targetEnv}/${cleanKey}`);
               if (cityRes.success && cityRes.keys) {
                 for (const ak of cityRes.keys) {
                   const appName = ak.replace(/\/$/, '');
-                  if (appName && appName !== cityName) {
+                  if (appName && appName !== cleanKey.replace(/^apps-/, '')) {
                     appsSet.add(appName);
                   }
                 }
